@@ -1,5 +1,8 @@
 import math
 import numpy as np
+
+import base_tools as btls
+
 from scipy.spatial.transform import Rotation
 
 
@@ -20,7 +23,7 @@ def line_traj_xyz(psxyz, pexyz, residual, step, refineStepRatio=1):
 
     accumStart = residual
     accumEnd = disxyz
-    accumV, residualArc = get_accumList(accumStart, accumEnd, step, refineStepRatio)
+    accumV, residualArc = btls.get_accumList(accumStart, accumEnd, step, refineStepRatio)
 
     accumLen = len(accumV)
     trajTmp = [[accumV[i], 0, 0] for i in range(accumLen)]
@@ -84,7 +87,7 @@ def circular_traj(psxyz, pmxyz, pexyz, residual, step, refineStepRatio=1):
     else:
         arcTmp = residual
         # 获取弧长累积量
-        arcV, residualArc = get_accumList(arcTmp, seArc, step, refineStepRatio)
+        arcV, residualArc = btls.get_accumList(arcTmp, seArc, step, refineStepRatio)
 
         # 计算位姿
         for arcK in arcV:
@@ -139,41 +142,6 @@ def get_circular_center_base_3point3D(pd1, pd2, pd3):
     centerpoint[2] = -(a1 * b2 * d3 - a1 * b3 * d2 - a2 * b1 * d3 + a2 * b3 * d1 + a3 * b1 * d2 - a3 * b2 * d1) * fac
 
     return centerpoint
-
-
-def get_accumList(accumStart, accumEnd, step, refineStepRatio):
-    """
-    增量列表计算，带拐角细化
-    :param accumStart: 其实位置
-    :param accumEnd: 终止位置
-    :param step: 步长
-    :param refineStepRatio:拐角处细化比率
-    :return:
-    """
-    rstep = step * refineStepRatio
-    accumV = []
-    residualArc = 0
-    # 直线部分
-    while 1:
-        if accumStart > accumEnd:
-            break
-        accumV.append(accumStart)
-        accumStart += step
-
-    # 拐角部分细化
-    if accumStart > accumEnd:
-        accumStart -= step
-
-    if (accumStart + rstep) > accumEnd:
-        residualArc = rstep - (accumEnd - accumStart)
-    else:
-        while 1:
-            accumStart += rstep
-            if accumStart > accumEnd:
-                break
-            accumV.append(accumStart)
-        residualArc = rstep - (accumEnd - accumStart + rstep)
-    return accumV, residualArc
 
 
 def handle_rot_angle_based_rot_axis(rotAxis0, rotAxis1, rotAngle):

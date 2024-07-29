@@ -27,7 +27,7 @@ def parse_rot(Rot, axis=((0, 0), (1, 0), (2, 0))):
         pitchA = np.arcsin(s1)  # 俯仰角处于(-pi/2, pi/2)
     cp = np.cos(pitchA)
 
-    if np.isclose(pitchA, np.pi/2) or np.isclose(pitchA, -np.pi/2):  # np.isclose(cp, 0)的约束没有np.isclose(pitchA, np.pi/2) or np.isclose(pitchA, -np.pi/2)强
+    if not np.isclose(pitchA, np.pi/2) or not np.isclose(pitchA, -np.pi/2):  # np.isclose(cp, 0)的约束没有np.isclose(pitchA, np.pi/2) or np.isclose(pitchA, -np.pi/2)强
         sr = Rot[0][1]/cp
         cr = Rot[1][1]/cp
         sy = Rot[2][0]/cp
@@ -142,6 +142,7 @@ def rotmat2qvec(R):
         )
         / 3.0
     )
+
     # 对K进行特征值、特征向量计算，基于最大特征值对应的特征向量计算四元数
     eigvals, eigvecs = np.linalg.eigh(K)
     qvec = eigvecs[[3, 0, 1, 2], np.argmax(eigvals)]
