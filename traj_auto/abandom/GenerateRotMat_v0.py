@@ -97,8 +97,7 @@ for i in range(500):
     #                    [0,np.cos(sta),np.sin(sta)],
     #                   [0,-np.sin(sta),np.cos(sta)]])
     # R_w2c = np.dot(transM,R_w2c)
-    qv = rotmat2qve
-    c(R_w2c)
+    qv = rotmat2qvec(R_w2c)
     tv = Rt[:3,3]
     image1 = data[1]
     image1 = image1._replace(id=i,qvec=qv,tvec=tv)

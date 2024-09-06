@@ -18,8 +18,14 @@ def get_angle(arc_length, radius):
     return angle
 
 
-def distance_p1p2(pt1, pt2):
-    return math.sqrt((pt1[0]-pt2[0])**2 + (pt1[1]-pt2[1])**2)
+def distance_p1p2(pt1_, pt2_):
+    assert len(pt1_) == len(pt2_)
+    ptLen_ = len(pt1_)
+    dis_ = 0
+    for pIdx_ in range(ptLen_):
+        dis_ += (pt1_[pIdx_]-pt2_[pIdx_])**2
+
+    return math.sqrt(dis_)
 
 
 # 叉积计算
@@ -31,20 +37,24 @@ def cross_product(v1, v2):
     return v1[0]*v2[1] - v1[1]*v2[0]
 
 
-def calc_point_inline_with_y(pt1, pt2, y):
+def calc_point_inline_with_y(pt1_, pt2_, y_):
     # 计算连接pt1和pt2的线段上，y坐标为y的点
-    s = pt1[1] - pt2[1]
-    if not np.isclose(s, 0):
-        x = (y-pt1[1])*(pt1[0]-pt2[0]) / s + pt1[0]
+    s_ = pt1_[1] - pt2_[1]
+    if not np.isclose(s_, 0):
+        x_ = (y_-pt1_[1])*(pt1_[0]-pt2_[0]) / s_ + pt1_[0]
     else:
         return None
 
     # 判断x是否在pt1、pt2在x轴的投影里，不是的话返回false
-    minX, maxX = min(pt1[0], pt2[0]), max(pt1[0], pt2[0])
-    if (x < minX) or (x > maxX):
+    minX_, maxX_ = min(pt1_[0], pt2_[0]), max(pt1_[0], pt2_[0])
+    if (x_ < minX_) or (x_ > maxX_):
         return None
 
-    return [x, y]
+    return [x_, y_]
+
+
+def calc_cross_degree(v1_, v2_):
+    return np.degrees(np.arccos(np.dot(v1_, v2_) / (np.linalg.norm(v1_)*np.linalg.norm(v2_))))
 
 
 # #########################################仿射变换#################################################################3
@@ -379,6 +389,12 @@ def polygon_norm(vertexs):
 
 def create_rotate_polygon(vertexs, pt, theta):
     """
+     无人机航线规划 ，基于凸多边形地块往复式运动。
+     凹多边形有时会出现不能完全覆盖的情况 。 一般处理方法就是将一个凹多边形切割成多个凸多边形 。
+     vertexs 拐角点列表
+     pt      中心点
+     theta   角度
+
     让多边形绕着中心点（外接矩形的中心点）旋转想要的角度，将得到的新多边形再与纬度线做相交操作，获取到那些交点之后，再将那些交点旋转回来。
     换句话说，变换前它是一个任意多边形，变换后，它还是一个任意多边形，都是满足上面已经预设好的场景的。
     这样的好处显而易见，你不需要修改上面的任何一个函数，也不需要去多写一条两个一次函数求交点的公式。
@@ -468,36 +484,40 @@ def get_polygonLine_area(polyline, sideStep):
     return area * sideStep
 
 
-def line_re_order(lines):
-    linesLen = len(lines)
-    assert linesLen % 2 == 0, "线段端点需要为偶数"
-    linesCp = []
-    for lidx in range(0, linesLen, 2):
-        linesCp.append(lines[lidx+1])
-        linesCp.append(lines[lidx])
-    return linesCp
+def line_re_order(lines_):
+    linesLen_ = len(lines_)
+    assert linesLen_ % 2 == 0, "线段端点需要为偶数"
+    linesCp_ = []
+    for lidx_ in range(0, linesLen_, 2):
+        linesCp_.append(lines_[lidx_+1])
+        linesCp_.append(lines_[lidx_])
+    return linesCp_
 
 
-def fix_lines(rVertexsE, routRect, rOutRectE, lines, d, sStep):
+def fix_lines(rVertexs, rVertexsE, routRect, rOutRectE, lines, d, sStep):
     # 判断顶部和底部超过拓张前，旋转后的凸多边形边界的线段数目
     topAboveNums = 0
     botBeyondNums = 0
     vertexsNum = len(rVertexsE)
     linesLen = len(lines)
 
+    routRectSmall = copy.deepcopy(routRect) if d < 0 else copy.deepcopy(rOutRectE)
+    routRectBig = copy.deepcopy(rOutRectE) if d < 0 else copy.deepcopy(routRect)
+    rVertexsBig = copy.deepcopy(rVertexsE) if d < 0 else copy.deepcopy(rVertexs)
     for lidx in range(linesLen):
-        if lines[lidx][1] <= routRect[0][1]:
+        if lines[lidx][1] <= routRectSmall[0][1]:
             break
         topAboveNums += 1
     topAboveNums /= 2
 
     for lidx in range(linesLen-1, -1, -1):
-        if lines[lidx][1] >= routRect[2][1]:
+        if lines[lidx][1] >= routRectSmall[2][1]:
             break
         botBeyondNums += 1
     botBeyondNums /= 2
 
     linesCp = []
+
     if topAboveNums > 1:
         lineCot = int((topAboveNums-1) * 2)
         linesCp = copy.deepcopy(lines[lineCot:])
@@ -506,23 +526,32 @@ def fix_lines(rVertexsE, routRect, rOutRectE, lines, d, sStep):
     elif topAboveNums == 1:
         linesCp = copy.deepcopy(lines)
     else:
-        # 遍历每一个多边形顶点
-        newY = lines[0][1]
-        while newY <= routRect[0][1]:
-            newY += 0.1*sStep
         linesTmp = []
-        for j in range(vertexsNum):
-            point = calc_point_inline_with_y(
-                rVertexsE[j],
-                rVertexsE[(j + 1) % vertexsNum],
-                newY
-            )
+        if d != 0:
+            # 遍历每一个多边形顶点
+            newY = lines[0][1]
+            while newY <= routRectSmall[0][1]:
+                newY += 0.1 * sStep
+            if newY >= routRectBig[0][1]:
+                newY = 0.4*(rVertexsBig[0][1]-routRectSmall[0][1]) + routRectSmall[0][1]
+            for j in range(vertexsNum):
+                point = calc_point_inline_with_y(
+                    rVertexsBig[j],
+                    rVertexsBig[(j + 1) % vertexsNum],
+                    newY
+                )
 
-            if point:
-                linesTmp.append(point)
+                if point:
+                    linesTmp.append(point)
+        else:
+            # 若无外扩行为，则不用进行过多的考虑，轨迹复制，但需要对y坐标进行调整
+            linesTmp = copy.deepcopy(lines[:2])
+            if linesTmp[0][1] < routRectSmall[0][1]:
+                linesTmp[0][1] = routRectSmall[0][1]
+                linesTmp[1][1] = routRectSmall[0][1]
 
         # 保证有两个不重合的交点
-        assert len(linesTmp) == 2 and linesTmp[0][0] != linesTmp[1][0]
+        assert len(linesTmp) == 2 and linesTmp[0][0] != linesTmp[1][0], "{}, {}, {}".format(len(linesTmp), linesTmp[0][0], linesTmp[1][0])
         linesCp = [[max(linesTmp[0][0], linesTmp[1][0]), linesTmp[0][1]],
                    [min(linesTmp[0][0], linesTmp[1][0]), linesTmp[0][1]]] + lines
         linesCp = line_re_order(linesCp)
@@ -532,20 +561,29 @@ def fix_lines(rVertexsE, routRect, rOutRectE, lines, d, sStep):
         for _ in range(lineCot):
             linesCp.pop()
     elif botBeyondNums < 1:
-        # 遍历每一个多边形顶点
-        newY = linesCp[-1][1]
-        while newY >= routRect[2][1]:
-            newY -= 0.1*sStep
         linesTmp = []
-        for j in range(vertexsNum):
-            point = calc_point_inline_with_y(
-                rVertexsE[j],
-                rVertexsE[(j + 1) % vertexsNum],
-                newY
-            )
+        if d != 0:
+            # 遍历每一个多边形顶点
+            newY = linesCp[-1][1]
+            while newY >= routRectSmall[2][1]:
+                newY -= 0.1*sStep
+            if newY <= rVertexsBig[2][1]:
+                newY = 0.4 * (rVertexsBig[2][1] - routRectSmall[2][1]) + routRectSmall[2][1]
+            for j in range(vertexsNum):
+                point = calc_point_inline_with_y(
+                    rVertexsBig[j],
+                    rVertexsBig[(j + 1) % vertexsNum],
+                    newY
+                )
 
-            if point:
-                linesTmp.append(point)
+                if point:
+                    linesTmp.append(point)
+        else:
+            # 若无外扩行为，则不用进行过多的考虑，轨迹复制，但需要对y坐标进行调整
+            linesTmp = copy.deepcopy(lines[-1:-3:-1])
+            if linesTmp[0][1] > routRectSmall[2][1]:
+                linesTmp[0][1] = routRectSmall[2][1]
+                linesTmp[1][1] = routRectSmall[2][1]
 
         # 保证有两个不重合的交点
         assert len(linesTmp) == 2 and linesTmp[0][0] != linesTmp[1][0]
@@ -573,12 +611,12 @@ def fix_lines(rVertexsE, routRect, rOutRectE, lines, d, sStep):
     return linesCp
 
 
-def dji_poly_traj_v1(vertexs, sideStep, theta=0, d=0):
+def dji_poly_traj_v1(vertexs, sideStep, theta=0, d=0, isFixLine=True):
     """
     vertexs: 凸多边形的顶点
     sideOverlap: 旁向重叠率
     theta: 逆时针旋转角度
-    d: 缩放间隔，<0，内缩，>0，外扩
+    d: 缩放间隔，<0，外扩，>0，内缩
     """
     if d != 0:
         vertexsE = expand_polygon_d(vertexs, d, expand_point=False)
@@ -629,12 +667,68 @@ def dji_poly_traj_v1(vertexs, sideStep, theta=0, d=0):
     # 对生成的直线进行后处理
     rvertexs = create_rotate_polygon(vertexs, pt, theta)
     routRect, _ = create_poly_bounds(rvertexs)
-    linesCp = fix_lines(rVertexsE, routRect, rOutRectE, lines, d, sideStep)
+    if isFixLine:
+        linesCp = fix_lines(rvertexs, rVertexsE, routRect, rOutRectE, lines, d, sideStep)
+    else:
+        linesCp = lines
 
     # 最后就可以直接转换来进行绘制
-    rLines = create_rotate_polygon(lines, pt, -theta)
+    rLines = create_rotate_polygon(linesCp, pt, -theta)
 
     return rLines, vertexsE
+
+
+def cross_lines(trajLine0_, trajLine1_):
+    # 用于产生井字路线，确保trajLine0_与trajLine1_为两条相互正交的航线
+    assert (len(trajLine0_) >= 4 and len(trajLine1_) >= 4)
+
+    ps0 = [trajLine0_[0], trajLine0_[1], trajLine0_[-2], trajLine0_[-1]]
+    ps1 = [trajLine1_[0], trajLine1_[1], trajLine1_[-2], trajLine1_[-1]]
+
+    assert (((ps0[0][0] != ps0[1][0]) or (ps0[0][1] != ps0[1][1])) and
+            ((ps0[0][0] != ps0[2][0]) or (ps0[0][1] != ps0[2][1])) and
+            ((ps0[0][0] != ps0[3][0]) or (ps0[0][1] != ps0[3][1])) and
+            ((ps1[0][0] != ps1[1][0]) or (ps1[0][1] != ps1[1][1])) and
+            ((ps1[0][0] != ps1[2][0]) or (ps1[0][1] != ps1[2][1])) and
+            ((ps1[0][0] != ps1[3][0]) or (ps1[0][1] != ps1[3][1]))
+            )
+
+    eIdx0_, sIdx1_ = 3, 0
+    minDis_ = distance_p1p2(ps0[3], ps1[0])
+    for idx0_ in range(4):
+        for idx1_ in range(4):
+            if idx0_ != 3 and idx1_ != 0:
+                disTmp_ = distance_p1p2(ps0[idx0_], ps1[idx1_])
+                if disTmp_ < minDis_:
+                    eIdx0_ = idx0_
+                    sIdx1_ = idx1_
+                    minDis_ = disTmp_
+
+    crossIdx_ = len(trajLine0_)-1
+    trajLine0R_ = copy.deepcopy(trajLine0_)
+    trajLine1R_ = copy.deepcopy(trajLine1_)
+
+    if eIdx0_ != 0 and eIdx0_ != 3:
+        trajLine0R_ = line_re_order(trajLine0R_)
+    if eIdx0_ <= 1:
+        trajLine0R_ = trajLine0R_[::-1]
+
+    if sIdx1_ != 0 and sIdx1_ != 3:
+        trajLine1R_ = line_re_order(trajLine1R_)
+    if sIdx1_ >= 2:
+        trajLine1R_ = trajLine1R_[::-1]
+
+    trajLineCross_ = trajLine0R_ + trajLine1R_
+
+    return trajLineCross_, crossIdx_
+
+
+def well_poly_traj_v1(vertexs_, sideStep_, theta_=0, d_=0, isFixLine=True):
+    trajLines0_, vertexsE_ = dji_poly_traj_v1(vertexs_, sideStep_, theta_, d_)
+    trajLines1_, _ = dji_poly_traj_v1(vertexs_, sideStep_, theta_+90, d_)
+    trajLines_ = trajLines0_ + trajLines1_
+
+    return trajLines_, vertexs_
 
 
 if __name__ == '__main__':
@@ -642,7 +736,15 @@ if __name__ == '__main__':
     data = [[30.0, 0.0], [-21.86905882264234, 20.536413177860666], [-29.057494833858932, 7.460696614945645], [-29.763441039434337, -3.7599970069291286], [26.289200401315906, -14.45261022305146]]
     sideStep, headStep = 1.384615384615385, 1.3461538461538458
     traj_line, dataE = dji_poly_traj_v1(data, sideStep, 0, -headStep)
-    print(len(traj_line))
-    btls.polygon_draw([data, dataE], traj_line)
+    traj_line1, _ = dji_poly_traj_v1(data, sideStep, 90, -headStep)
+
+    # print(len(traj_line))
+    traj_line_sum = traj_line + traj_line1
+    print(distance_p1p2(traj_line[-1], traj_line1[0]))
+    btls.polygon_draw([data, dataE], traj_line_sum)
+
+    traj_line_sum_, crossIdx = cross_lines(traj_line, traj_line1)
+    print(distance_p1p2(traj_line_sum_[crossIdx], traj_line_sum_[crossIdx+1]))
+    btls.polygon_draw([data, dataE], traj_line_sum_)
 
 

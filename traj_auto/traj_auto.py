@@ -9,8 +9,34 @@ import tools.geo_tools as gtls
 from read_write_model import *
 
 
+def test_line(vertexs, flyHeight, roadWidth,
+              headOverlap=0.8, rratio=1.,
+              pitchD=-60,
+              isCoord=False,
+              frameW=35, frameH=24, focal=26,
+              yawType=-1,
+              baseIdx=100000,
+              workDir="", fileName="auto_traj"):
+    viewDis = (roadWidth//2)+1
+    sstep = btls.get_step_base_rep_ratio(viewDis, frameH, focal, headOverlap) if isCoord else btls.get_step_base_rep_ratio(viewDis, frameW, focal, headOverlap)
+
+    print(sstep)
+    print(vertexs)
+
+    trajLists = utl.get_traj_by_node_sim(vertexs, sstep, rratio, yawType, isClose=True)
+
+    trajListLen = len(trajLists)
+    heightList = [flyHeight for _ in range(trajListLen)]
+    regionPoint = [0, 0, 0]
+    posList = utl.get_pos_by_traj_sim(trajLists, heightList, regionPoint, pitchD)
+
+    if len(workDir) > 0:
+        utl.tum_txt_write(posList, workDir, fileName)
+
+
 def test_fukan_dji(vertexs,
                    flyHeight, sideOverlap=0.7,  headOverlap=0.8, rratio=1.,
+                   trajType='cattle',
                    pitchD=-60,
                    yawType=-2,
                    isCoord=False,
@@ -22,11 +48,19 @@ def test_fukan_dji(vertexs,
         flyHeight: 飞行高度
         sideOverlap: 旁向重叠率
         headOverlap: 航向重叠率
+        trajType: 航线类型
         isCoord: 采集期间，相机镜头长画幅与短画幅和行进路线之间的关系
         frameW: 相机列方向画幅（单位为mm）
         frameH: 相机行方向画幅（单位为mm）
         focal: 相机焦距（单位为mm）
-        yawType: 偏航角类型，1-相机朝向与飞机行进方向一致，2-相机镜头朝着行进方向逆时针90度的方向，0-相机镜头朝着行进方向顺时针90度的方向，-2-大疆的行进方向
+        yawType: 偏航角类型，
+            1-相机朝向与飞机行进方向一致，
+            2-相机镜头朝着行进方向逆时针90度的方向，
+            0-相机镜头朝着行进方向顺时针90度的方向，
+            -2-大疆的行进方向，
+            -1-5向飞行，带着单个相机的飞机飞五次来模拟五个镜头，
+            -3-带偏移的5向飞行
+            -4-5向飞行2
     """
 
     vertexsNorm, verGrav = gtls.polygon_norm(vertexs)
@@ -41,11 +75,17 @@ def test_fukan_dji(vertexs,
     print(sideStep, headStep)
     print(vertexs)
 
-    trajNodes, _ = gtls.dji_poly_traj_v1(vertexsNorm, sideStep, 0, min(-headStep, -sideStep))
+    if trajType == 'cattle':
+        trajNodes, _ = gtls.dji_poly_traj_v1(vertexsNorm, sideStep, 0, min(-headStep, -sideStep))
+    elif trajType == 'well':
+        trajNodes, _ = gtls.well_poly_traj_v1(vertexsNorm, sideStep, 0, min(-headStep, -sideStep))
+    else:
+        raise Exception
 
     # btls.polygon_draw([vertexsNorm], trajNodes)
+    yawTypeTmp_ = yawType if trajType != 'well' else 1
 
-    trajLists = utl.get_traj_by_node_sim(trajNodes, headStep, rratio, yawType)
+    trajLists = utl.get_traj_by_node_sim(trajNodes, headStep, rratio, yawTypeTmp_)
 
     trajListLen = len(trajLists)
     heightList = [flyHeight for _ in range(trajListLen)]
@@ -139,6 +179,45 @@ def test_loop(height, vertexs,
     #                       "/home/hongqingde/workspace_git/test/cdata_sparse/images.bin")
 
 
+def test_valid_region(vertexs, flyHeight, pitchDRange,
+                      overlap=0.8,
+                      isCoord=False,
+                      frameW=35, frameH=24, focal=26,
+                      workDir="", fileName="auto_traj_fukan_dji"
+                      ):
+    """
+    区域级的测试数据采集
+    vertexs: 重建区域所对应的多边形的顶点
+    flyHeight: 飞行高度
+    pitchDRange: 俯仰角相关信息，采集训练数据时所用的俯仰角，采集测试数据时所用的俯仰角的随机变化范围
+    """
+    vertexsNorm, verGrav = gtls.polygon_norm(vertexs)
+
+    if isCoord:
+        sideStep = btls.get_step_base_rep_ratio(flyHeight, frameW, focal, overlap)
+        headStep = btls.get_step_base_rep_ratio(flyHeight, frameH, focal, overlap)
+    else:
+        sideStep = btls.get_step_base_rep_ratio(flyHeight, frameH, focal, overlap)
+        headStep = btls.get_step_base_rep_ratio(flyHeight, frameW, focal, overlap)
+
+    print(sideStep, headStep)
+    print(vertexs)
+
+    trajNodes, _ = gtls.dji_poly_traj_v1(vertexsNorm, sideStep, 0, min(headStep, sideStep), isFixLine=False)
+
+    trajLists = utl.get_traj_by_node_sim(trajNodes, headStep, 1., 1)
+
+    trajListLen = len(trajLists)
+    heightList = [flyHeight for _ in range(trajListLen)]
+    regionPoint = verGrav + [0]
+    posList = utl.get_pos_by_traj_for_region_test(trajLists, heightList, regionPoint, pitchDRange)
+
+    # if len(workDir) > 0:
+    #     utl.tum_txt_write(posList, workDir, fileName)
+    btls.images_bin_write("/home/hongqingde/workspace_git/test/images.bin", posList,
+                          "/home/hongqingde/workspace_git/test/cdata_sparse/images.bin")
+
+
 def test_polygon(height, vertexs, radiusSup,
                  posNum, pitchDs,
                  rratio=1.,
@@ -201,8 +280,10 @@ def test_polygon(height, vertexs, radiusSup,
                           "/home/hongqingde/workspace_git/test/cdata_sparse/images.bin")
 
 
+
+
 if __name__ == '__main__':
-    # data = gtls.tu_polygon_gen(5, 10)
+    data = gtls.tu_polygon_gen(5, 30)
 
     # test_loop(20, data, [1], [50], [-30],
     #           # yawNumRadPerPos=(-90, -45, 45, 90),
@@ -216,13 +297,16 @@ if __name__ == '__main__':
     #                  0.1,
     #                  dstPath="/home/hongqingde/workspace_git/test/cdata_sparse/images.bin")
 
-    data = [[0, 0], [0, 10], [20, 10], [20, 0]]
-    # test_fukan_dji(data,
-    #                44, sideOverlap=0.7, headOverlap=0.8, rratio=1.,
-    #                pitchD=-60,
-    #                yawType=-2,
-    #                isCoord=False,
-    #                frameW=35, frameH=24, focal=26,
-    #                workDir="", fileName="auto_traj_fukan_dji")
+    # data = [[0, 0], [0, 10], [20, 10], [20, 0]]
+    test_fukan_dji(data,
+                   10, sideOverlap=0.8, headOverlap=0.9, rratio=1.,
+                   trajType='well',
+                   pitchD=-45,
+                   yawType=-4,
+                   isCoord=False,
+                   frameW=35, frameH=24, focal=26,
+                   workDir="", fileName="auto_traj_fukan_dji")
 
-    test_polygon(44, data, [1, 5, 9], [10, 20, 30], [-30, -30, -30], rratio=1, isConnect=True, isFocus=False)
+    # test_valid_region(data, 40, pitchDRange=[-60, -44, -45])
+
+    # test_polygon(44, data, [1, 5, 9], [10, 20, 30], [-30, -30, -30], rratio=1, isConnect=True, isFocus=False)

@@ -122,11 +122,11 @@ def get_traj_by_node_sim(nodeList, step, rratio, yawType=-2, isClose=False):
     nodeList: 航线节点
     step: 航向间隔
     rstep: 拐弯处的航向间隔
-    yawType: 偏航角类型，1-相机朝向与飞机行进方向一致，2-相机镜头朝着行进方向逆时针90度的方向，0-相机镜头朝着行进方向顺时针90度的方向，-2-大疆的行进方向
+    yawType: 偏航角类型，1-相机朝向与飞机行进方向一致，2-相机镜头朝着行进方向逆时针90度的方向，0-相机镜头朝着行进方向顺时针90度的方向，-2-大疆的行进方向, -1-五向飞行, -3-带偏移五向飞行, -4-五向飞行2
     """
     traj_ = []
     rest_ = 0
-    assert yawType in (0, 1, 2, -2), '偏航角定义存在问题'
+    assert yawType in (0, 1, 2, -2, -1, -3, -4), '偏航角定义存在问题'
 
     lineds = []  # 每一段直线或弧线所包含的采集位置数目
     nodeLen = len(nodeList)
@@ -163,27 +163,165 @@ def get_pos_by_traj_sim(trajList, heightList, regionPoint, pitchD=30):
     # 根据轨迹的二维坐标、所在路线形状以及相机朝向，确定相机位姿
     posList = []
     org_vec = np.array([0, 0, 1])
-    sta_ = np.radians(pitchD)
     rollD = np.pi
 
     trajLen = len(trajList)
     assert trajLen > 1, "路线上的采集位置数目少于2，航向难以确定"
 
-    for tidx in range(trajLen):
-        if tidx == 0:
-            tangen_vec = [-trajList[tidx+1][0] + trajList[tidx][0], -trajList[tidx+1][1] + trajList[tidx][1]]
-        elif tidx == trajLen-1:
-            tangen_vec = [-trajList[tidx][0] + trajList[tidx-1][0], -trajList[tidx][1] + trajList[tidx-1][1]]
-        else:
-            tangen_vec = [(-trajList[tidx + 1][0] + trajList[tidx-1][0])/2.,
-                          (-trajList[tidx + 1][1] + trajList[tidx-1][1])/2.]
+    if trajList[0][3] not in [-1, -3, -4]:
+        sta_ = np.radians(pitchD)
+        for tidx in range(trajLen):
+            if tidx == 0:
+                tangen_vec = [-trajList[tidx+1][0] + trajList[tidx][0], -trajList[tidx+1][1] + trajList[tidx][1]]
+            elif tidx == trajLen-1:
+                tangen_vec = [-trajList[tidx][0] + trajList[tidx-1][0], -trajList[tidx][1] + trajList[tidx-1][1]]
+            else:
+                tangen_vec = [(-trajList[tidx + 1][0] + trajList[tidx-1][0])/2.,
+                              (-trajList[tidx + 1][1] + trajList[tidx-1][1])/2.]
 
-        if trajList[tidx][3] == 0:  # 行进方向顺时针90度
-            tangen_vec = gtls.rotate_coordinate(tangen_vec, 0, 0, -90)
-        elif trajList[tidx][3] == 1:  # 与相近方向上一致
-            tangen_vec = gtls.rotate_coordinate(tangen_vec, 0, 0, -180)
-        elif trajList[tidx][3] == 2:  # 行进方向逆时针90度
-            tangen_vec = gtls.rotate_coordinate(tangen_vec, 0, 0, 90)
+            if trajList[tidx][3] == 0:  # 行进方向顺时针90度
+                tangen_vec = gtls.rotate_coordinate(tangen_vec, 0, 0, -90)
+            elif trajList[tidx][3] == 1:  # 与相近方向上一致
+                tangen_vec = gtls.rotate_coordinate(tangen_vec, 0, 0, -180)
+            elif trajList[tidx][3] == 2:  # 行进方向逆时针90度
+                tangen_vec = gtls.rotate_coordinate(tangen_vec, 0, 0, 90)
+
+            t_ = [trajList[tidx][0], 0, trajList[tidx][1]]
+            transM_X = get_pitch_rot(sta_)
+            transM_Z = get_roll_rot(rollD)
+            transM_ZX = np.dot(transM_Z, transM_X)
+            R_w2c = get_Rw2c(tangen_vec, org_vec, transM_ZX)
+            qv = posPar.rotmat2qvec(R_w2c).tolist()
+
+            t = [t_[0] + regionPoint[0], -t_[1] + heightList[tidx] + regionPoint[2], t_[2] + regionPoint[1]]
+            tn = get_Tw2c_1(t, R_w2c)
+            tv = tn.tolist()
+            # 将变换矩阵转为四元数+平移向量的形式，并存放到images.bin里面以进行查看生成的轨迹效果
+            posList.append(qv + tv)
+    else:
+        # 五向飞行
+        trajIdxs = [range(trajLen), range(trajLen-1, -1, -1)]
+        tangen_vec = [-trajList[1][0] + trajList[0][0], -trajList[1][1] + trajList[0][1]]
+
+        if trajList[0][3] in (-1, -3):
+            tangen_vec_list = [
+                gtls.rotate_coordinate(tangen_vec, 0, 0, 90),
+                gtls.rotate_coordinate(tangen_vec, 0, 0, -180),  # 与行进方向上一致
+                gtls.rotate_coordinate(tangen_vec, 0, 0, -90),  # 行进方向顺时针90度
+                tangen_vec,  # 与行进方向相反
+                gtls.rotate_coordinate(tangen_vec, 0, 0, 90)  # 行进方向逆时针90度
+            ]
+
+            pitchD_list = [
+                -90,
+                pitchD,
+                pitchD,
+                pitchD,
+                pitchD
+            ]
+
+            rollD_list = [
+                rollD,
+                rollD,
+                rollD,
+                rollD,
+                rollD
+            ]
+        else:
+            tangen_vec_list = [
+                gtls.rotate_coordinate(tangen_vec, 0, 0, 90),
+                gtls.rotate_coordinate(tangen_vec, 0, 0, 90),
+                gtls.rotate_coordinate(tangen_vec, 0, 0, 90),
+                gtls.rotate_coordinate(tangen_vec, 0, 0, -180),  # 与行进方向上一致
+                tangen_vec,  # 与行进方向相反
+            ]
+
+            pitchD_list = [
+                -90,
+                pitchD,
+                pitchD-90,
+                pitchD,
+                pitchD
+            ]
+
+            rollD_list = [
+                rollD,
+                rollD,
+                rollD,
+                rollD-np.pi/2,
+                rollD+np.pi/2
+            ]
+
+        H = heightList[0]  # 整条轨迹的飞行高度要保持一致
+        moveBias = 0. if trajList[0][3] in (-1, -4) else float(H) / math.tan(np.radians(-pitchD))
+        xBiass = [
+            0,
+            -moveBias,
+            0,
+            moveBias,
+            0
+        ]
+        yBiass = [
+            0,
+            0,
+            moveBias,
+            0,
+            -moveBias
+        ]
+
+        for upperIdx in range(len(tangen_vec_list)):
+            transM_X = get_pitch_rot(np.radians(pitchD_list[upperIdx]))
+            transM_Z = get_roll_rot(rollD_list[upperIdx])
+            transM_ZX = np.dot(transM_Z, transM_X)
+            R_w2c = get_Rw2c(tangen_vec_list[upperIdx], org_vec, transM_ZX)
+            qv = posPar.rotmat2qvec(R_w2c).tolist()
+            for tidx in trajIdxs[upperIdx % 2]:
+                t_ = [trajList[tidx][0]+xBiass[upperIdx], 0, trajList[tidx][1]+yBiass[upperIdx]]
+                t = [t_[0] + regionPoint[0], -t_[1] + heightList[tidx] + regionPoint[2], t_[2] + regionPoint[1]]
+                tn = get_Tw2c_1(t, R_w2c)
+                tv = tn.tolist()
+                posList.append(qv + tv)
+
+    return posList
+
+
+def get_pos_by_traj_for_region_test(trajList, heightList, regionPoint, pitchDRange):
+    # 生成用于测试数据采集的相机位姿
+    posList = []
+    org_vec = np.array([0, 0, 1])
+    rollD = np.pi
+
+    trajLen = len(trajList)
+    assert trajLen > 1, "路线上的采集位置数目少于2，航向难以确定"
+
+    random.seed(42)
+    np.random.seed(42)
+    pitchList_ = [random.uniform(pitchDRange[0], pitchDRange[1]) for _ in range(trajLen)]
+
+    disMax, disMin = 0., np.inf
+    for tidx in range(trajLen):
+        disx, disy = trajList[tidx][0], trajList[tidx][1]
+        disTmp = math.sqrt(disx**2 + disy**2)
+        if disTmp > disMax:
+            disMax = disTmp
+        if disTmp < disMin:
+            disMin = disTmp
+
+    varScale = 89. / (disMax-disMin)
+
+    for tidx in range(trajLen):
+        sta_ = np.radians(pitchList_[tidx])
+
+        disx, disy = trajList[tidx][0], trajList[tidx][1]
+        disTmp = math.sqrt(disx ** 2 + disy ** 2)
+        varTmp = (disMax-disTmp) * varScale + 1.  # 越靠近重心，偏航角变化越大
+        varTmp2 = 2*varTmp
+        yawRan = np.random.normal(0, varTmp)
+        while yawRan < -varTmp2 or yawRan > varTmp2:
+            yawRan = np.random.normal(0, varTmp)
+
+        tangen_vec = [-trajList[tidx][0], -trajList[tidx][1]]
+        tangen_vec = gtls.rotate_coordinate(tangen_vec, 0, 0, yawRan)
 
         t_ = [trajList[tidx][0], 0, trajList[tidx][1]]
         transM_X = get_pitch_rot(sta_)
@@ -199,6 +337,7 @@ def get_pos_by_traj_sim(trajList, heightList, regionPoint, pitchD=30):
         posList.append(qv + tv)
 
     return posList
+
 
 
 def get_loop_pos(radius, heightS, heightE, posNum, regionPoint,
@@ -374,7 +513,7 @@ def change_rot_for_airsim(srcRot):
     yawP = np.array([[np.cos(yawA), 0, -np.sin(yawA)],
                      [0, 1, 0],
                      [np.sin(yawA), 0, np.cos(yawA)]])
-    yawAH = yawA-90
+    yawAH = yawA-np.pi/2
     yawPH = np.array([[np.cos(yawAH), 0, -np.sin(yawAH)],
                      [0, 1, 0],
                      [np.sin(yawAH), 0, np.cos(yawAH)]])
