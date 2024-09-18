@@ -75,15 +75,20 @@ def test_fukan_dji(vertexs,
     print(sideStep, headStep)
     print(vertexs)
 
+    # extendD = min(-headStep, -sideStep)
+    extendD = 0
+
     if trajType == 'cattle':
-        trajNodes, _ = gtls.dji_poly_traj_v1(vertexsNorm, sideStep, 0, min(-headStep, -sideStep))
+        trajNodes, _ = gtls.dji_poly_traj_v1(vertexsNorm, sideStep, 0, extendD)
     elif trajType == 'well':
-        trajNodes, _ = gtls.well_poly_traj_v1(vertexsNorm, sideStep, 0, min(-headStep, -sideStep))
+        trajNodes, _ = gtls.well_poly_traj_v1(vertexsNorm, sideStep, 0, extendD)
     else:
         raise Exception
 
     # btls.polygon_draw([vertexsNorm], trajNodes)
     yawTypeTmp_ = yawType if trajType != 'well' else 1
+
+    print(trajNodes)
 
     trajLists = utl.get_traj_by_node_sim(trajNodes, headStep, rratio, yawTypeTmp_)
 
@@ -280,10 +285,8 @@ def test_polygon(height, vertexs, radiusSup,
                           "/home/hongqingde/workspace_git/test/cdata_sparse/images.bin")
 
 
-
-
 if __name__ == '__main__':
-    data = gtls.tu_polygon_gen(5, 30)
+    # data = gtls.tu_polygon_gen(5, 30)
 
     # test_loop(20, data, [1], [50], [-30],
     #           # yawNumRadPerPos=(-90, -45, 45, 90),
@@ -297,9 +300,9 @@ if __name__ == '__main__':
     #                  0.1,
     #                  dstPath="/home/hongqingde/workspace_git/test/cdata_sparse/images.bin")
 
-    # data = [[0, 0], [0, 10], [20, 10], [20, 0]]
+    data = [[-127, 0], [0, 0], [0, 127], [-127, 127]]
     test_fukan_dji(data,
-                   10, sideOverlap=0.8, headOverlap=0.9, rratio=1.,
+                   40, sideOverlap=0.7, headOverlap=0.8, rratio=0.5,
                    trajType='well',
                    pitchD=-45,
                    yawType=-4,

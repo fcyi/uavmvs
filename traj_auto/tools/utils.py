@@ -339,7 +339,6 @@ def get_pos_by_traj_for_region_test(trajList, heightList, regionPoint, pitchDRan
     return posList
 
 
-
 def get_loop_pos(radius, heightS, heightE, posNum, regionPoint,
                  pitchD=30,
                  yawNumRadPerPos=0):

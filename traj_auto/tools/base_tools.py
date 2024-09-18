@@ -1,11 +1,22 @@
 import copy
 import math
+import os.path
+
+import sys 
+
+sys.path.append('..')
 
 import numpy as np
 import matplotlib.pyplot as plt
 import read_write_model as rwm
 
 import geo_tools as gtls
+
+import collections
+
+ExtrinsicParams = collections.namedtuple(
+    "Image", ["id", "params", "camId", "name"]  # params = [qw, qx, qy, qz, tx, ty, tz]
+)
 
 
 def UniSampling(number):
@@ -220,17 +231,105 @@ def calculate_flyHeight(fov, resolution, regionVertexs):
     return 10.0 * max(flyHeightH, flyHeightW)
 
 
-def calculate_intrinsic_params(resoluation_, fov_):
+def get_intrinsic_params_for_airsim(resoluation_, fov_):
     """
-    resoluation_: 宽度和高度分辨率（或画幅宽度和高度）
-    fov_: 视场角（单位为度，此处假设水平视场角和垂直视场角一致）
-    return: [cx_, cy_, fx_, fy_], 相机中心，水平和垂直方向的焦距（中心、焦距的单位由resoluation决定）
+    在airsim中水平方向的fov与垂直方向的fov是一致的，在设置文件settings.json中调整的fov其实也就是这个参数
+    resoluation_: 图像的宽度和高度（单位为像素）
+    fov_: 视场角（单位为度）
+    return: [fx_, fy_, cx_, cy_, width_, height_], 相机中心，水平和垂直方向的焦距（中心、焦距的单位由resoluation决定）
     """
     width_, height_ = resoluation_[:]
     cx_ = width_ / 2.
     cy_ = height_ / 2.
 
+    fx_ = width_ / 2. / math.tan(math.radians(fov_ / 2.))
+    fy_ = width_ / 2. / math.tan(math.radians(fov_ / 2.))  # 注意，此处不是height_ / 2. / math.tan(math.radians(fov_ / 2.))
+
+    return [fx_, fy_, cx_, cy_, width_, height_]
 
 
+def get_extrinsic_params_from_airsim(inputPath_, isInv=False):
+    assert os.path.exists(inputPath_)
+    extrinsicParams_ = dict()
+
+    with open(inputPath_, 'r') as fid_:
+        fcot_ = 1
+        camId_ = 1
+        for line_ in fid_:
+            if len(line_) <= 0 or line_[0] == '#':
+                continue
+            line_ = line_.strip()
+            elements_ = line_.split()
+            if isInv:
+                paramsTmp_ = np.array(tuple(map(float, [elements_[7], *elements_[4:7], *elements_[1:4]])))
+                paramsTmp_ = paramsTmp_.tolist()
+                RTmp_ = rwm.qvec2rotmat(paramsTmp_[:4])
+                TTmp_ = np.eye(4, 4)
+                TTmp_[:3, :3] = RTmp_
+                TTmp_[:3, 3] = np.array(paramsTmp_[4:])
+                TInvTmp_ = np.linalg.inv(TTmp_)
+                RInvTmp_ = TInvTmp_[:3, :3]
+                tInvTmp_ = TInvTmp_[:3, 3]
+                qvecInv_ = rwm.rotmat2qvec(RInvTmp_)
+                params_ = qvecInv_.tolist() + tInvTmp_.tolist()
+            else:
+                params_ = np.array(tuple(map(float, [elements_[7], *elements_[4:7], *elements_[1:4]])))
+            fileName = elements_[0] + '.png'
+            extrinsicParams_[fcot_] = ExtrinsicParams(id=fcot_, params=params_, camId=camId_, name=fileName)
+            fcot_ += 1
+    return extrinsicParams_
+
+
+def write_intrinsic_params(intrinsicMatrixs_, outputDir_, fileName_="cameras.txt"):
+    intrinsicMatrixsNum_ = len(intrinsicMatrixs_)
+
+    if not os.path.exists(outputDir_):
+        os.makedirs(outputDir_, exist_ok=True)
+
+    outputPath_ = os.path.join(outputDir_, fileName_)
+
+    cameras_ = dict()
+    for inMIdx_, inM_ in enumerate(intrinsicMatrixs_):
+        cameras_[inMIdx_+1] = rwm.Camera(id=inMIdx_+1, model='PINHOLE', width=inM_[4], height=inM_[5], params=inM_[:4])
+
+    rwm.write_cameras_text(cameras_, outputPath_)
+
+
+def write_extrinsic_params(extrinsicParams_, outputDir_, fileName_="images.txt"):
+    extrinsicParamsNum_ = len(extrinsicParams_)
+
+    if not os.path.exists(outputDir_):
+        os.makedirs(outputDir_, exist_ok=True)
+
+    outputPath_ = os.path.join(outputDir_, fileName_)
+
+    HEADER_ = (
+            "# Image list with two lines of data per image:\n"
+            + "# IMAGE_ID, QW, QX, QY, QZ, TX, TY, TZ, CAMERA_ID, NAME\n"
+            + "# POINTS2D[] as (X, Y, POINT3D_ID)\n"
+            + "# Number of images: {}, mean observations per image: 2\n".format(extrinsicParamsNum_)
+    )
+
+    with open(outputPath_, "w") as fid_:
+        fid_.write(HEADER_)
+        for _, exParam in extrinsicParams_.items():
+            to_write = [exParam.id, *exParam.params, exParam.camId, exParam.name]
+            line_ = " ".join([str(elem_) for elem_ in to_write])
+            fid_.write(line_ + "\n\n")
+
+
+if __name__ == '__main__':
+
+    intrinsicParams = get_intrinsic_params_for_airsim([1920, 1080], 90)
+    extrinsicParams = get_extrinsic_params_from_airsim(
+        "/home/hongqingde/devdata/trans/urban/block2_sim/train/gt_as_col_pose.txt",
+        True
+    )
+
+    outputDir = "/home/hongqingde/devdata/workspace_gitmp/input/testData/created/sparse"
+
+    write_intrinsic_params(intrinsicMatrixs_=[intrinsicParams], outputDir_=outputDir)
+    write_extrinsic_params(extrinsicParams_=extrinsicParams, outputDir_=outputDir)
 
     pass
+

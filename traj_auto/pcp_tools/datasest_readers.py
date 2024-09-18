@@ -153,8 +153,8 @@ def readColmapSceneInfo(path, images, eval, llffhold=8):
         cam_intrinsics = read_intrinsics_text(cameras_intrinsic_file)
 
     reading_dir = "images" if images is None else images
-    # colmap中存储的旋转是相机坐标系到世界坐标系的旋转，平移量是相机坐标系下的平移，但是由于读取时的对旋转矩阵的转置操作，
-    # 读取到的外参中的旋转是世界坐标系到相机坐标系的旋转，平移量是相机坐标系下的平移
+    # colmap中存储的旋转是世界坐标系到相机坐标系的旋转，平移量是世界坐标系到相机坐标系下的平移，但是由于读取时的对旋转矩阵的转置操作，
+    # 读取到的外参中的旋转是相机坐标系到世界坐标系的旋转，平移量是世界坐标系到相机坐标系下的平移
     cam_infos_unsorted = readColmapCameras(cam_extrinsics=cam_extrinsics, cam_intrinsics=cam_intrinsics,
                                            images_folder=os.path.join(path, reading_dir))
     cam_infos = sorted(cam_infos_unsorted.copy(), key=lambda x: x.image_name)

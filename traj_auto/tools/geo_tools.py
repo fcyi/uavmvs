@@ -549,12 +549,20 @@ def fix_lines(rVertexs, rVertexsE, routRect, rOutRectE, lines, d, sStep):
             if linesTmp[0][1] < routRectSmall[0][1]:
                 linesTmp[0][1] = routRectSmall[0][1]
                 linesTmp[1][1] = routRectSmall[0][1]
+            else:
+                linesTmp = []
+            # else:  # linesTmp[0][1] == routRectSmall[0][1]
+            #     linesTmp[0][1] = routRectSmall[0][1] + abs(d / 2.)
+            #     linesTmp[1][1] = routRectSmall[0][1] + abs(d / 2.)
 
-        # 保证有两个不重合的交点
-        assert len(linesTmp) == 2 and linesTmp[0][0] != linesTmp[1][0], "{}, {}, {}".format(len(linesTmp), linesTmp[0][0], linesTmp[1][0])
-        linesCp = [[max(linesTmp[0][0], linesTmp[1][0]), linesTmp[0][1]],
-                   [min(linesTmp[0][0], linesTmp[1][0]), linesTmp[0][1]]] + lines
-        linesCp = line_re_order(linesCp)
+        if linesTmp:
+            # 保证有两个不重合的交点
+            assert len(linesTmp) == 2 and linesTmp[0][0] != linesTmp[1][0], "{}, {}, {}".format(len(linesTmp), linesTmp[0][0], linesTmp[1][0])
+            linesCp = [[max(linesTmp[0][0], linesTmp[1][0]), linesTmp[0][1]],
+                       [min(linesTmp[0][0], linesTmp[1][0]), linesTmp[0][1]]] + lines
+            linesCp = line_re_order(linesCp)
+        else:
+            linesCp = copy.deepcopy(lines)
 
     if botBeyondNums > 1:
         lineCot = int((botBeyondNums-1) * 2)
@@ -584,16 +592,22 @@ def fix_lines(rVertexs, rVertexsE, routRect, rOutRectE, lines, d, sStep):
             if linesTmp[0][1] > routRectSmall[2][1]:
                 linesTmp[0][1] = routRectSmall[2][1]
                 linesTmp[1][1] = routRectSmall[2][1]
+            else:
+                linesTmp = []
+            # else:  # linesTmp[0][1] == routRectSmall[0][1]
+            #     linesTmp[0][1] = routRectSmall[2][1] - abs(d / 2.)
+            #     linesTmp[1][1] = routRectSmall[2][1] - abs(d / 2.)
 
-        # 保证有两个不重合的交点
-        assert len(linesTmp) == 2 and linesTmp[0][0] != linesTmp[1][0]
-        linescpLen = len(linesCp) / 2
-        if linescpLen % 2 == 0:
-            linesCp.append([min(linesTmp[0][0], linesTmp[1][0]), linesTmp[0][1]])
-            linesCp.append([max(linesTmp[0][0], linesTmp[1][0]), linesTmp[0][1]])
-        else:
-            linesCp.append([max(linesTmp[0][0], linesTmp[1][0]), linesTmp[0][1]])
-            linesCp.append([min(linesTmp[0][0], linesTmp[1][0]), linesTmp[0][1]])
+        if len(linesTmp) > 0:
+            # 保证有两个不重合的交点
+            assert len(linesTmp) == 2 and linesTmp[0][0] != linesTmp[1][0]
+            linescpLen = len(linesCp) / 2
+            if linescpLen % 2 == 0:
+                linesCp.append([min(linesTmp[0][0], linesTmp[1][0]), linesTmp[0][1]])
+                linesCp.append([max(linesTmp[0][0], linesTmp[1][0]), linesTmp[0][1]])
+            else:
+                linesCp.append([max(linesTmp[0][0], linesTmp[1][0]), linesTmp[0][1]])
+                linesCp.append([min(linesTmp[0][0], linesTmp[1][0]), linesTmp[0][1]])
 
     if abs(linesCp[0][0] - linesCp[1][0]) < d:
         linesCp[0][0] -= d
@@ -724,11 +738,11 @@ def cross_lines(trajLine0_, trajLine1_):
 
 
 def well_poly_traj_v1(vertexs_, sideStep_, theta_=0, d_=0, isFixLine=True):
-    trajLines0_, vertexsE_ = dji_poly_traj_v1(vertexs_, sideStep_, theta_, d_)
-    trajLines1_, _ = dji_poly_traj_v1(vertexs_, sideStep_, theta_+90, d_)
-    trajLines_ = trajLines0_ + trajLines1_
+    trajLines0_, vertexsE_ = dji_poly_traj_v1(vertexs_, sideStep_, theta_, d_, isFixLine)
+    trajLines1_, _ = dji_poly_traj_v1(vertexs_, sideStep_, theta_+90, d_, isFixLine)
+    trajLines_, _ = cross_lines(trajLines0_, trajLines1_)
 
-    return trajLines_, vertexs_
+    return trajLines_, vertexsE_
 
 
 if __name__ == '__main__':
