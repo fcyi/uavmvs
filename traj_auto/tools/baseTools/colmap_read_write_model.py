@@ -749,6 +749,26 @@ def camTodatabase(databasePath_, camerasInfo_):
     db_.close()
 
 
+def remove_images_based_fileNames(inputPath_, removeNames_, outputPath_=None):
+    fileName_ = os.path.basename(inputPath_)
+    ext_ = fileName_.split('.')[-1]
+
+    images_ = read_images_binary(inputPath_) if ext_ == 'bin' else read_images_text(inputPath_)
+
+    for imageKey_, imageValue_ in images_.items():
+        imageNameFull_ = imageValue_.name
+        imageName_ = imageNameFull_.split('.')[0]
+        if imageName_ in removeNames_:
+            del images_[imageKey_]
+
+    outputPathTmp_ = outputPath_ if outputPath_ is not None else inputPath_
+    extO_ = os.path.basename(outputPathTmp_).split('.')[-1]
+    if extO_ == 'bin':
+        write_images_binary(images_, outputPathTmp_)
+    else:
+        write_images_text(images_, outputPathTmp_)
+
+
 # ======================================================================================================================
 
 
