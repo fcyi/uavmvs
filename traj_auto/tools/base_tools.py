@@ -128,31 +128,41 @@ def images_bin_write(binPath, posList, dstPath=""):
     rwm.write_images_binary(data, dstPath)
 
 
-def get_step_base_rep_ratio(flyHeight, frame, focal=0, ratio=0.8, pp=1.):
+def get_step_base_rep_ratio(flyHeight_, frame_, fovD_, pitchD_, focal_=0, ratio_=0.8, HLimit=100, pp_=1.):
     """
-    * height    无人机高度，单位米(m)
-    * frame     画幅（航向--短画幅、旁向--长画幅）传感器的长宽
-    * focal     焦距
-    * ratio     重叠率
+    * height_    无人机高度，单位米(m)
+    * frame_    画幅（航向--短画幅、旁向--长画幅）传感器的长宽
+    * focal_     焦距
+    * ratio_     重叠率
+    * HLimit     无人机最大飞行高度，根据要求的地物最小分辨率、无人机的最大相对地面的飞行高度亦或是无人机所携带相机的最大有效观测范围决定
     * return double   非重叠部分的真实距离
     """
     # 基于指定的重叠率、飞行高度、相机画幅来获取相机移动的步长
     # 飞行高度的单位为m，飞行高度以及画幅的单位为mm
     # 相机画幅与实际的感光元件的尺寸有关，一般长画幅为35mm（与旁向重叠率相关），短画幅为24mm（与航向重叠率相关）
     # 如果focal焦距为0的话，则使用默认值值26毫米
-    focal = 26 if focal == 0 else focal
+    focal_ = 26 if focal_ == 0 else focal_
     # 单位换成米
-    focal /= 1000
-    frame /= 1000
-    # 设呈现的真实距离（拍摄到的距离）为x
-    x = frame * flyHeight / focal
+    focal_ /= 1000
+    frame_ /= 1000
+    # 设相机能拍摄、呈现的真实距离（拍摄到的距离）为x，相机能够拍摄到的真实距离需要根据相机的俯仰角以及视场角进行调整修正
+    assert (pitchD_ <= 0) and (fovD_ > 0), "在俯瞰视角获取场合，相机朝上没有意义。当然相机的视场角也可能设置错误"
+
+    pitchDTmp_ = -pitchD_  # 后续计算都是使用俯仰角的角度值的绝对值
+    if (2*pitchDTmp_) > fovD_:
+        recorrectRatio_ = math.sin(math.pi - (fovD_ / 2.)) / math.sin((fovD_ / 2.) + pitchDTmp_)
+        x_ = (frame_ * flyHeight_ / focal_) * recorrectRatio_
+    elif (fovD_ >= (2*pitchDTmp_)) and (pitchDTmp_ > 0):
+        x_ = flyHeight_ * (math.tan(math.pi/2. - pitchDTmp_) - math.tan(math.pi/2. - fovD_/2. - pitchDTmp_))
+    else:
+        x_ = HLimit - flyHeight_*math.tan(math.pi/2. - fovD_/2.)
     # 重叠率的计算，pp，若实际重叠率ration的步进长度为基准重叠率ratio的步进长度的pp倍，该如何计算ration
-    ration = 1. - pp*(1. - ratio)
+    ration_ = 1. - pp_*(1. - ratio_)
     # 重叠部分的距离
-    d = ration * x
+    d_ = ration_ * x_
     # 非重叠部分的距离 （单位米）
-    d = x - d
-    return d
+    d_ = x_ - d_
+    return d_
 
 
 def calcFlightSpeed(courseInterval, timeInterval):

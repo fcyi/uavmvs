@@ -754,12 +754,15 @@ def remove_images_based_fileNames(inputPath_, removeNames_, outputPath_=None):
     ext_ = fileName_.split('.')[-1]
 
     images_ = read_images_binary(inputPath_) if ext_ == 'bin' else read_images_text(inputPath_)
-
+    removeIds_ = []
     for imageKey_, imageValue_ in images_.items():
         imageNameFull_ = imageValue_.name
         imageName_ = imageNameFull_.split('.')[0]
         if imageName_ in removeNames_:
-            del images_[imageKey_]
+            removeIds_.append(imageKey_)
+
+    for removeId_ in removeIds_:
+        del images_[removeId_]
 
     outputPathTmp_ = outputPath_ if outputPath_ is not None else inputPath_
     extO_ = os.path.basename(outputPathTmp_).split('.')[-1]

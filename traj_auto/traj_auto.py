@@ -185,16 +185,17 @@ def test_loop(height, vertexs,
 
 
 def test_valid_region(vertexs, flyHeight, pitchDRange,
+                      isBound,
                       overlap=0.8,
                       isCoord=False,
                       frameW=35, frameH=24, focal=26,
                       workDir="", fileName="auto_traj_fukan_dji"
                       ):
     """
-    区域级的测试数据采集
-    vertexs: 重建区域所对应的多边形的顶点
-    flyHeight: 飞行高度
-    pitchDRange: 俯仰角相关信息，采集训练数据时所用的俯仰角，采集测试数据时所用的俯仰角的随机变化范围
+        区域级的测试数据采集
+        vertexs: 重建区域所对应的多边形的顶点
+        flyHeight: 飞行高度
+        pitchDRange: 俯仰角相关信息，采集训练数据时所用的俯仰角，采集测试数据时所用的俯仰角的随机变化范围
     """
     vertexsNorm, verGrav = gtls.polygon_norm(vertexs)
 
@@ -208,14 +209,19 @@ def test_valid_region(vertexs, flyHeight, pitchDRange,
     print(sideStep, headStep)
     print(vertexs)
 
-    trajNodes, _ = gtls.dji_poly_traj_v1(vertexsNorm, sideStep, 0, min(headStep, sideStep), isFixLine=False)
+    extendD = min(headStep, sideStep) if not isBound else max(-headStep, -sideStep)
 
-    trajLists = utl.get_traj_by_node_sim(trajNodes, headStep, 1., 1)
+    trajNodes, vertexsE = gtls.dji_poly_traj_v1(vertexsNorm, sideStep, 0, extendD, isFixLine=False)
+
+    nodesTest = trajNodes if not isBound else vertexsE
+    if isBound:
+        nodesTest.append(vertexsE[0])
+    trajLists = utl.get_traj_by_node_sim(nodesTest, headStep, 1., 1)
 
     trajListLen = len(trajLists)
     heightList = [flyHeight for _ in range(trajListLen)]
     regionPoint = verGrav + [0]
-    posList = utl.get_pos_by_traj_for_region_test(trajLists, heightList, regionPoint, pitchDRange)
+    posList = utl.get_pos_by_traj_for_region_test(trajLists, heightList, regionPoint, pitchDRange, isBound=isBound)
 
     # if len(workDir) > 0:
     #     utl.tum_txt_write(posList, workDir, fileName)

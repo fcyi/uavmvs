@@ -12,30 +12,35 @@
 #     cv2.waitKey()
 
 
-import cv2
 import numpy as np
+from scipy import interpolate
+
 import matplotlib.pyplot as plt
 
-# 1. 读取图像
-image = cv2.imread('/home/hongqingde/Downloads/DJI_0110.JPG')  # 替换为你的图像路径
-# 将 BGR 转换为 RGB
-image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+#x = np.arange(0, 2*np.pi+np.pi/4, 2*np.pi/8)
+#y = np.sin(x)
 
-# 2. 计算直方图
-# 使用 cv2.calcHist() 计算每个通道的直方图
-channels = ('r', 'g', 'b')
-hist_data = {}
-for i, color in enumerate(channels):
-    hist_data[color] = cv2.calcHist([image], [i], None, [256], [0, 256])
+ctr =np.array( [
+                (3 , 1), (2.5, 4), (0, 1),
+                (-2.5, 4),
+                # (-3, 0), (-2.5, -4), (0, -1), (2.5, -4), (3, -1)
+                ])
 
-# 3. 绘制直方图
-plt.figure(figsize=(10, 5))
-for color, hist in hist_data.items():
-    plt.plot(hist, color=color)
-    plt.xlim([0, 256])
+x=ctr[:,0]
+y=ctr[:,1]
 
-plt.title('Color Histogram')
-plt.xlabel('Pixel Values')
-plt.ylabel('Frequency')
-plt.legend(channels)
+#x=np.append(x,x[0])
+#y=np.append(y,y[0])
+
+nums_ = 2*ctr.shape[0]
+tck, u = interpolate.splprep([x, y], k=3,s=0)
+u=np.linspace(0,1,num=nums_,endpoint=True)
+out = interpolate.splev(u,tck)
+
+plt.figure()
+plt.plot(x, y, 'ro', out[0], out[1], 'b')
+plt.legend(['Points', '插值B样条', '真实数据'],loc='best')
+plt.axis([min(x)-1, max(x)+1, min(y)-1, max(y)+1])
+plt.title('B样条插值')
 plt.show()
+

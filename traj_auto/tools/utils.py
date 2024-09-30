@@ -7,6 +7,7 @@ import math
 import os
 import matplotlib.pyplot as plt
 import sys
+from scipy import interpolate
 
 sys.path.append("./")
 
@@ -58,6 +59,8 @@ def line_traj_2D(psxy, pexy, residual, step, refineStepRatio=1):
         for i in range(accumLen):
             traj[i][0] += psxy[0]
             traj[i][1] += psxy[1]
+    else:
+        residualArc += residual
 
     return traj, residualArc
 
@@ -117,12 +120,13 @@ def get_Tw2c_1(t, R, isTranspose=False):
     return (-np.dot(rotM, t)).reshape((3,))
 
 
-def get_traj_by_node_sim(nodeList, step, rratio, yawType=-2, isClose=False):
+def get_traj_by_node_sim(nodeList, step, rratio, yawType=-2, isSmooth=True, isClose=False):
     """
     nodeList: 航线节点
     step: 航向间隔
     rstep: 拐弯处的航向间隔
     yawType: 偏航角类型，1-相机朝向与飞机行进方向一致，2-相机镜头朝着行进方向逆时针90度的方向，0-相机镜头朝着行进方向顺时针90度的方向，-2-大疆的行进方向, -1-五向飞行, -3-带偏移五向飞行, -4-五向飞行2
+    isSmooth: 是否使用b样条插值法对拐角处进行平滑
     """
     traj_ = []
     rest_ = 0
@@ -131,11 +135,126 @@ def get_traj_by_node_sim(nodeList, step, rratio, yawType=-2, isClose=False):
     lineds = []  # 每一段直线或弧线所包含的采集位置数目
     nodeLen = len(nodeList)
     travLen = nodeLen if isClose else nodeLen-1
-    for i in range(travLen):
-        j = (i+1) % nodeLen
-        trajt_, rest_ = line_traj_2D(nodeList[i], nodeList[j], rest_, step, rratio)
-        traj_ += trajt_
-        lineds.append(len(trajt_))
+
+    if not isSmooth:
+        for i in range(travLen):
+            j = (i+1) % nodeLen
+            trajt_, rest_ = line_traj_2D(nodeList[i], nodeList[j], rest_, step, rratio)
+            traj_ += trajt_
+            lineds.append(len(trajt_))
+    else:
+        rest_ = 0
+        pSrc_ = None
+        assert travLen % 2 == 0, "目前平滑操作仅适用于标准的牛耕路线，而标准的牛耕路线中轨迹节点有且仅有偶数个"
+        for i in range(0, travLen, 2):
+            j = (i+1) % nodeLen
+            if not pSrc_:
+                pSrc_ = nodeList[i]
+            pSrcT_ = nodeList[i]
+            pDst_ = nodeList[j]
+            trajt_, _ = line_traj_2D(pSrc_, pDst_, 0, step, 1)
+            traj_ += trajt_
+
+            if i <= (travLen-4):  # 只有这种情况下的拐角才有处理的必要
+                ctrPts_ = [[]]*4  # b样条插值所需的控制点
+                ctrPts_[1] = pDst_
+                ctrPts_[2] = nodeList[(i+2) % nodeLen]
+                samplePt3T = nodeList[(i+3) % nodeLen]
+                dis00 = gtls.distance_p1p2(pSrcT_, ctrPts_[1])
+                dis10 = gtls.distance_p1p2(ctrPts_[2], samplePt3T)
+                refineStep_ = step * rratio
+                if (dis00 > 0) and (dis10 > 0):  # b样条插值的控制点钟不能有重复点
+                    _ = traj_.pop()
+                    ctrPts_[0] = traj_[-1]
+                    dis01 = gtls.distance_p1p2(ctrPts_[0], ctrPts_[1])
+                    disR = dis01 / dis00
+                    ctrPts_[3] = [
+                        ctrPts_[2][0] + (samplePt3T[0]-ctrPts_[2][0])*disR,
+                        ctrPts_[2][1] + (samplePt3T[1]-ctrPts_[2][1])*disR
+                    ]
+
+                    ctrPts_ = np.array(ctrPts_)
+                    ctrXs_ = ctrPts_[:, 0]
+                    ctrYs_ = ctrPts_[:, 1]
+
+                    tckNodes_, _ = interpolate.splprep([ctrXs_, ctrYs_], k=3, s=0)
+                    tList_ = np.linspace(0, 1, num=12, endpoint=True)
+                    out_ = interpolate.splev(tList_, tckNodes_)
+                    disSum_ = 0
+                    for tIdx_ in range(11):
+                        disSum_ += gtls.distance_p1p2(
+                            [out_[0][tIdx_], out_[1][tIdx_]],
+                            [out_[0][tIdx_+1], out_[1][tIdx_+1]]
+                        )
+                    ptsNum_ = math.ceil(disSum_ / refineStep_)
+                    print("xxxxxxxxxxxxxxxxxxxxxxx==", ptsNum_, "==xxxxxxxxxxxxxxxxxxxxxxx")
+                    tList_ = np.linspace(0, 1, num=ptsNum_, endpoint=True)
+                    out_ = interpolate.splev(tList_, tckNodes_)
+                    wrapTrajs_ = [[out_[0][oIdx_], out_[1][oIdx_]] for oIdx_ in range(ptsNum_)]
+
+                    pSrc_ = wrapTrajs_.pop()
+                    traj_ += wrapTrajs_
+                elif (dis00 > 0) and (dis10 == 0):
+                    _ = traj_.pop()
+                    ctrPts_[0] = traj_[-1]
+                    _ = ctrPts_.pop()
+                    ctrPts_ = np.array(ctrPts_)
+                    ctrXs_ = ctrPts_[:, 0]
+                    ctrYs_ = ctrPts_[:, 1]
+
+                    tckNodes_, _ = interpolate.splprep([ctrXs_, ctrYs_], k=2, s=0)
+                    tList_ = np.linspace(0, 1, num=9, endpoint=True)
+                    out_ = interpolate.splev(tList_, tckNodes_)
+                    disSum_ = 0
+                    for tIdx_ in range(9):
+                        disSum_ += gtls.distance_p1p2(
+                            [out_[0][tIdx_], out_[1][tIdx_]],
+                            [out_[0][tIdx_ + 1], out_[1][tIdx_ + 1]]
+                        )
+                    ptsNum_ = math.ceil(disSum_ / refineStep_)
+                    print("xxxxxxxxxxxxxxxxxxxxxxx==", ptsNum_, "==xxxxxxxxxxxxxxxxxxxxxxx")
+                    tList_ = np.linspace(0, 1, num=ptsNum_, endpoint=True)
+                    out_ = interpolate.splev(tList_, tckNodes_)
+                    wrapTrajs_ = [[out_[0][oIdx_], out_[1][oIdx_]] for oIdx_ in range(ptsNum_)]
+                    pSrc_ = wrapTrajs_.pop()
+                    traj_ += wrapTrajs_
+                elif (dis00 == 0) and (dis10 > 0):
+                    _ = traj_.pop()
+                    ctrPts_[0] = traj_[-1]
+                    if dis10 < step:
+                        disR = 1
+                    else:
+                        disR = step / dis10
+                    ctrPts_[3] = [
+                        ctrPts_[2][0] + (samplePt3T[0] - ctrPts_[2][0]) * disR,
+                        ctrPts_[2][1] + (samplePt3T[1] - ctrPts_[2][1]) * disR
+                    ]
+
+                    ctrPts_ = np.array(ctrPts_)
+                    ctrXs_ = ctrPts_[:, 0]
+                    ctrYs_ = ctrPts_[:, 1]
+
+                    tckNodes_, _ = interpolate.splprep([ctrXs_, ctrYs_], k=3, s=0)
+                    tList_ = np.linspace(0, 1, num=12, endpoint=True)
+                    out_ = interpolate.splev(tList_, tckNodes_)
+                    disSum_ = 0
+                    for tIdx_ in range(11):
+                        disSum_ += gtls.distance_p1p2(
+                            [out_[0][tIdx_], out_[1][tIdx_]],
+                            [out_[0][tIdx_ + 1], out_[1][tIdx_ + 1]]
+                        )
+                    ptsNum_ = math.ceil(disSum_ / refineStep_)
+                    print("xxxxxxxxxxxxxxxxxxxxxxx==", ptsNum_, "==xxxxxxxxxxxxxxxxxxxxxxx")
+                    tList_ = np.linspace(0, 1, num=ptsNum_, endpoint=True)
+                    out_ = interpolate.splev(tList_, tckNodes_)
+                    wrapTrajs_ = [[out_[0][oIdx_], out_[1][oIdx_]] for oIdx_ in range(ptsNum_)]
+
+                    pSrc_ = wrapTrajs_.pop()
+                    traj_ += wrapTrajs_
+                else:
+                    trajt_, _ = line_traj_2D(pSrc_, ctrPts_[2], 0, step, 1)
+                    pSrc_ = trajt_.pop()
+                    traj_ += trajt_
 
     cot = 0
     # 0-行进方式为顺时针，1-行进方向为逆时针

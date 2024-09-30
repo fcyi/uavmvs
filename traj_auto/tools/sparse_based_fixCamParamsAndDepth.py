@@ -99,13 +99,15 @@ def create_gt_points3D_by_depth_multi(trainDir_, K_, outputDir_, depthLimits_=(4
     dc2wKeysList_ = list(dw2c_.keys())
     traverseStep_ = 10
     dc2wLen_ = len(dc2wKeysList_)
-    dc2wIdxLast_ = (dc2wLen_ // int(traverseStep_))*int(traverseStep_)
+    dc2wIdxLast_ = (dc2wLen_ // int(traverseStep_)) * int(traverseStep_)
 
+    depthLimitsSub_ = depthLimits_[:4]
     for dc2wIdx_ in range(0, dc2wLen_, traverseStep_):
-        dc2wEnd_ = dc2wIdx_+traverseStep_ if dc2wIdx_ != dc2wIdxLast_ else dc2wLen_
+        dc2wEnd_ = dc2wIdx_ + traverseStep_ if dc2wIdx_ != dc2wIdxLast_ else dc2wLen_
 
         with ProcessPoolExecutor() as executor:
-            futures_ = [executor.submit(process_image, id_, dw2c_[id_], depthDir_, imagesDir_, K_, depthLimits_) for id_
+            futures_ = [executor.submit(process_image, id_, dw2c_[id_], depthDir_, imagesDir_, K_, depthLimitsSub_) for
+                        id_
                         in dc2wKeysList_[dc2wIdx_:dc2wEnd_]]
             for future_ in as_completed(futures_):
                 resultColors_, resultPoint3ds_, resultNormals_, resultSobelScores_ = future_.result()
@@ -126,23 +128,80 @@ def create_gt_points3D_by_depth_multi(trainDir_, K_, outputDir_, depthLimits_=(4
     pointCloud_.points = o3d.utility.Vector3dVector(point3ds_)
     pointCloud_.colors = o3d.utility.Vector3dVector(colors_)
     pointCloud_.normals = o3d.utility.Vector3dVector(normals_)
-    if filterType_ == 0:
-        points_ = np.hstack([np.asarray(point3ds_), np.asarray(colors_)])
-        pcdDown_ = pointCloud_
-    else:
-        if filterType_ == 1:
-            downVoxelSize_ = 1
-            pcdDown_ = pointCloud_.voxel_down_sample(voxel_size=downVoxelSize_)
-        elif filterType_ == 2:
-            pcdDown_ = voxel_random_filter(pointCloud_, 0.1)
-        elif filterType_ == 3:
-            randomIdx_, randomIdxTexture_ = voxel_texture_filter(pointCloud_, sobelScores_, 0.2)
-            # pcdDown_ = pointCloud_.select_by_index(randomIdx_)
-            pcdDown_ = pointCloud_.select_by_index(randomIdxTexture_)
-            # print(f"dst num1 {len(pcdDown_.points)}, dst num2 {len(pcdDownTexture_.points)}")
-        else:
+
+    ptLimitMin_, ptLimitMax_ = depthLimits_[4], depthLimits_[5]
+
+    if ptLimitMin_ != -1 and ptLimitMax_ != -1 and ptLimitMin_ < ptLimitMax_:
+        if ptLimitMin_ <= point3ds_.shape[0] <= ptLimitMax_:
+            pass
+        elif point3ds_.shape[0] < ptLimitMin_:
             raise Exception
-        points_ = np.hstack([np.asarray(pcdDown_.points), np.asarray(pcdDown_.colors)])
+        else:
+            downVoxelSizeL_, downVoxelSizeR_ = 0.01, 0.5
+            downVoxelSizeM_ = -1
+            canFlg = True
+            while True:
+                pcdDownMin_ = pointCloud_.voxel_down_sample(voxel_size=downVoxelSizeR_)
+                ptNumsMin_ = np.array(pcdDownMin_.points).shape[0]
+                if ptNumsMin_ > ptLimitMax_:
+                    if downVoxelSizeR_ < 1.:
+                        downVoxelSizeR_ *= 2
+                    else:
+                        print('point clouds are so more')
+                        canFlg = False
+                        break
+                else:
+                    break
+
+            while True:
+                pcdDownMax_ = pointCloud_.voxel_down_sample(voxel_size=downVoxelSizeL_)
+                ptNumsMax_ = np.array(pcdDownMax_.points).shape[0]
+                if ptNumsMax_ < ptLimitMin_:
+                    if downVoxelSizeL_ > 0.01:
+                        downVoxelSizeL_ /= 2.
+                    else:
+                        print('point clouds are so sparse')
+                        canFlg = False
+                        break
+                else:
+                    break
+
+            if not canFlg:
+                raise Exception
+
+            while downVoxelSizeL_ < downVoxelSizeR_:
+                downVoxelSizeM_ = (downVoxelSizeL_ + downVoxelSizeR_) / 2.
+                pcdDown_ = pointCloud_.voxel_down_sample(voxel_size=downVoxelSizeM_)
+                ptNumsT_ = np.array(pcdDown_.points).shape[0]
+
+                if ptLimitMin_ <= ptNumsT_ <= ptLimitMax_:
+                    break
+
+                if ptNumsT_ < ptLimitMin_:
+                    downVoxelSizeR_ = downVoxelSizeM_
+                else:
+                    downVoxelSizeL_ = downVoxelSizeM_
+
+            pcdDown_ = pointCloud_.voxel_down_sample(voxel_size=downVoxelSizeM_)
+            points_ = np.hstack([np.asarray(pcdDown_.points), np.asarray(pcdDown_.colors)])
+    else:
+        if filterType_ == 0:
+            points_ = np.hstack([np.asarray(point3ds_), np.asarray(colors_)])
+            pcdDown_ = pointCloud_
+        else:
+            if filterType_ == 1:
+                downVoxelSize_ = 0.5
+                pcdDown_ = pointCloud_.voxel_down_sample(voxel_size=downVoxelSize_)
+            elif filterType_ == 2:
+                pcdDown_ = voxel_random_filter(pointCloud_, 0.1)
+            elif filterType_ == 3:
+                randomIdx_, randomIdxTexture_ = voxel_texture_filter(pointCloud_, sobelScores_, 0.2)
+                # pcdDown_ = pointCloud_.select_by_index(randomIdx_)
+                pcdDown_ = pointCloud_.select_by_index(randomIdxTexture_)
+                # print(f"dst num1 {len(pcdDown_.points)}, dst num2 {len(pcdDownTexture_.points)}")
+            else:
+                raise Exception
+            points_ = np.hstack([np.asarray(pcdDown_.points), np.asarray(pcdDown_.colors)])
 
     outputPath_ = os.path.join(outputDir_, fileName_)
     ext_ = fileName_.split('.')[-1]
