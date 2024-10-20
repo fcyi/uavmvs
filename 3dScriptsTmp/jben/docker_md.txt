@@ -1,0 +1,47 @@
+docker相关
+sudo docker images
+sudo docker rmi imageId
+sudo docker ps
+sudo docker ps -a
+sudo docker load < xxx.tar
+
+sudo docker run -v {source0}:{docker0} -v {source1}:{docker1} --name=hqd3dRecon --runtime=nvidia --network=host -it -d --shm-size=16g --rm 3drecon:v7.1
+eg: 
+sudo docker run -v /home/hongqingde/devdata/workspace_gitmp/input:/app/input --name=hqd3dRecon --runtime=nvidia --network=host -it -d --shm-size=32g --rm 3drecon:v7.1
+
+sudo docker exec -it hqd3dRecon /bin/bash
+sudo docker commit -m="add recon.py main and remove colmapRecon.py delete data part while run once" -a="hqd" ab4340ae2c55 3drecon:v11.13
+sudo docker stop containerId
+sudo docker cp (local)src containerId:dst
+
+
+######Dockerfile
+docker build -f {path to dockerfile} -t {仓库名}:{标签} . --network=host
+docker build -f /home/hongqingde/devdata/Dockerfile.DFSFM -t DFSFM:v1 . --network=host
+docker save -o xxx.tar {仓库名}:{标签}
+
+
+远程文件连接
+sudo sshfs -o allow_other,uid=$(id -u),gid=$(id -g) ar@10.88.207.99:/home/caoyf/standardization/output /home/hongqingde/devdata/map4
+eg: 
+sudo sshfs -o allow_other,uid=$(id -u),gid=$(id -g) ubuntu@10.88.216.120:/data1/algorithm_data /home/hongqingde/devdata/map2 
+mima: nanhu@2020
+
+sudo sshfs -o allow_other,uid=$(id -u),gid=$(id -g) ar@10.88.207.99:/home/caoyf/standardization /home/hongqingde/devdata/map
+mima: ar_v100@123
+
+sudo umount /home/hongqingde/devdata/map4
+sudo chown -R ar:ar /home/caoyf/standardization/output
+
+转内网：
+地址：smb://file.cnaeit.com/
+用户名：hongqingde
+密码：外网密码
+域名：CETHIK
+
+内存查看
+GPU: watch -n 1 nvidia-smi
+CPU: htop
+
+nanhu@2020
+

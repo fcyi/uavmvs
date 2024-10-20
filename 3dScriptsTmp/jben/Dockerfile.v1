@@ -1,0 +1,56 @@
+FROM 3drecon:base
+#####################安装算法后台服务依赖库#####################
+RUN pip install tornado py3nvml psutil
+RUN apt-get install net-tools
+
+#####################编译colmap系二进制程序#####################
+# eigen3.4
+COPY ./3rd/eigen-3.4.0 /mnt/eigen-3.4.0
+WORKDIR /mnt/eigen-3.4.0/
+RUN mkdir build && cd build && rm -rf * && cmake .. && make -j12 && make install && cd ../../ && rm -rf eigen-3.4.0
+
+## ceres
+COPY ./3rd/ceres-solver /mnt/ceres-solver
+RUN apt-get remove -y libceres-dev
+WORKDIR /mnt/ceres-solver/
+RUN mkdir build && cd build && rm -rf * && cmake .. && make -j12 && make install && cd ../../ && rm -rf ceres-solver
+
+## colmap
+COPY ./3rd/colmap /mnt/colmap
+WORKDIR /mnt/colmap/
+RUN mkdir build && cd build && rm -rf * && cmake .. -GNinja && ninja && ninja install && cd ../../ && rm -rf colmap
+
+## SphereSfM
+COPY ./3rd/SphereSfM /mnt/SphereSfM
+WORKDIR /mnt/SphereSfM/
+RUN mkdir build && cd build && rm -rf * && cmake .. -GNinja -DCMAKE_INSTALL_PREFIX=/app/sphere && ninja install && cd ../../ && rm -rf SphereSfM
+
+#####################安装3DGS定制流程依赖库#####################
+RUN pip install hdbscan==0.8.31 \
+git+https://githubfast.com/facebookresearch/pytorch3d.git@stable \
+einops \
+plyfile
+
+WORKDIR /mnt
+#ENV CUDA_ARCH_LIST="sm_70,sm_75"
+ENV TORCH_CUDA_ARCH_LIST="6.1;7.0;7.5;8.0+PTX"
+# simple-knn
+COPY ./gs/gaussian_splatting/submodules/simple-knn /mnt/simple-knn
+RUN pip install /mnt/simple-knn && rm -r /mnt/simple-knn/
+
+# default-gs, using light_gaussian diff-gaussian-rasterization 
+COPY ./gs/light_gaussian/submodules/compress-diff-gaussian-rasterization /mnt/diff-gaussian-rasterization
+RUN pip install /mnt/diff-gaussian-rasterization && rm -r /mnt/diff-gaussian-rasterization/
+
+# abs-gs
+COPY ./gs/AbsGS/submodules/diff-gaussian-rasterization-abs /mnt/diff_gaussian_rasterization_abs
+RUN pip install /mnt/diff_gaussian_rasterization_abs && rm -r /mnt/diff_gaussian_rasterization_abs/
+
+# pgsr-gs
+COPY ./gs/PGSR/submodules/diff-plane-rasterization /mnt/diff-plane-rasterization
+RUN pip install /mnt/diff-plane-rasterization && rm -r /mnt/diff-plane-rasterization/
+
+#####################安装3DGS定制流程依赖库#####################
+RUN mkdir /nhrecon
+WORKDIR /nhrecon
+CMD ["/bin/bash"]

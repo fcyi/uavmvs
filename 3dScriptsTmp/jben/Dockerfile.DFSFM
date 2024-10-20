@@ -1,0 +1,87 @@
+#####################基础镜像#########################
+FROM nvidia/cuda:11.8.0-devel-ubuntu22.04
+RUN rm -rf /app/*
+
+##################换源，安装基础编译环境#################
+# Install base utilities
+ENV DEBIAN_FRONTEND=noninteractive
+RUN sed -i 's/archive.ubuntu.com/mirrors.aliyun.com/g' /etc/apt/sources.list && \
+    apt-get update
+RUN apt-get install -y build-essential ninja-build \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# 下载CUDA 11.8安装包
+# 赋予执行权限并执行CUDA安装脚本
+# 注意：安装过程中可能需要交互，但Dockerfile不支持直接交互，因此这里使用echo和管道来自动接受协议
+# RUN wget https://developer.download.nvidia.com/compute/cuda/11.8.0/local_installers/cuda_11.8.0_520.61.05_linux.run  && \
+#     chmod +x cuda_11.8.0_520.61.05_linux.run && \
+#     echo "yes" | ./cuda_11.8.0_520.61.05_linux.run --silent --toolkit  && \
+#     rm cuda_11.8.0_520.61.05_linux.run
+
+# 设置CUDA环境变量
+# ENV PATH=/usr/local/cuda-11.8/bin:$PATH
+# ENV LD_LIBRARY_PATH=/usr/local/cuda-11.8/lib64:$LD_LIBRARY_PATH
+
+
+#######################################################
+
+
+
+
+#####################安装基础依赖库#####################
+RUN apt-get update && apt-get install -y \
+	cmake \
+	python3.9 \
+	pip \
+	git \
+	libboost-program-options-dev \
+	libboost-filesystem-dev \
+	libboost-graph-dev \
+	libboost-system-dev \
+	libboost-test-dev \
+	libeigen3-dev \
+	libsuitesparse-dev \
+	libfreeimage-dev \
+    libgoogle-glog-dev \
+	libgflags-dev \
+	libglew-dev \
+	qtbase5-dev \
+	libqt5opengl5-dev \
+	libcgal-dev \
+	libmetis-dev \
+	vim \
+	&& apt-get install -y libcgal-qt5-dev \
+    && apt-get install -y libatlas-base-dev libsuitesparse-dev 
+
+#####################安装基础重建Python库#####################
+ENV PIP_INDEX_URL https://pypi.tuna.tsinghua.edu.cn/simple
+RUN pip install torch==1.11.0 \
+                torchvision==0.12.0
+ENV PIP_INDEX_URL https://mirrors.aliyun.com/pypi/simple/
+RUN pip install tqdm \
+  				matplotlib \
+  				pylint \
+  				h5py==3.1.0 \
+  				loguru==0.5.3 \
+  				scipy \
+  				ipdb \
+  				pytorch-lightning==1.3.5 \
+				ray==2.7.1 \
+				opencv_python==4.4.0.46 \
+				pycolmap==0.3.0 \
+				yacs>=0.1.8 \
+				joblib \
+				einops==0.3.0 \
+				kornia==0.4.1 \
+				pickle5==0.0.11 \
+				timm>=0.3.2 \
+				hydra-core \
+				omegaconf \
+				wandb \
+				rich \
+				natsort \
+				torchmetrics==0.6.0
+
+WORKDIR /app
+

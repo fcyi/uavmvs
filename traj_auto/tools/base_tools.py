@@ -19,6 +19,20 @@ ExtrinsicParams = collections.namedtuple(
 )
 
 
+# 在有序且无重复元素的列表s_中查找p_出现或者第一个大于p_的位置，后续可以改为进一步2分加速
+def get_equal_based_sortedSquences(p_, s_, iS_, iE_):
+    isFound_ = False
+    iST_ = iS_
+    for idx_ in range(iS_, iE_):
+        if s_[idx_] >= p_:
+            iST_ = idx_
+            if s_[idx_] == p_:
+                isFound_ = True
+            break
+
+    return isFound_, iST_
+
+
 def UniSampling(number):
     return np.linspace(0, 360, number, endpoint=True)
 

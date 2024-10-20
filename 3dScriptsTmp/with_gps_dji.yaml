@@ -1,0 +1,36 @@
+pipeline_type: with_gps
+
+data:
+  source: ["dji"]
+
+cameras:
+  dji:
+    camera_type: perspective
+    camera_model: "PINHOLE"
+    intrinsics: [ ]
+    steps: [ ]
+
+use_gui: false
+overwrite: true
+prior_pose_file: "gnns.txt" # with_prior_pose
+stdout_file: "sfm_log.txt"
+increament_reconstruct: false
+extractor_params:
+#  SiftExtraction.max_num_feature: 16384
+  ImageReader.single_camera: 1  # 1-single; todo: 2-per_folder
+matcher_method: spatial_matcher
+matcher_params: []
+mapper_params:
+  Mapper.b_usable_prior: 1
+  Mapper.multiple_models: 1
+  Mapper.ba_refine_focal_length: 1
+  Mapper.ba_refine_principal_point: 0
+  Mapper.ba_refine_extra_params: 1
+  Mapper.ba_global_images_ratio: 1.1
+  Mapper.ba_global_points_ratio: 1.1
+  Mapper.ba_global_max_refinements: 5
+postprocess:
+  select_largest: true
+  estimate_scale: false
+  align_manhattan: true
+

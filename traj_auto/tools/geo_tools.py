@@ -28,6 +28,34 @@ def distance_p1p2(pt1_, pt2_):
     return math.sqrt(dis_)
 
 
+def line_from_points(p1_, p2_):
+    """ 从两个点计算直线的系数 A, B, C 使得 Ax + By + C = 0 """
+    A_ = p2_[1] - p1_[1]  # y2 - y1
+    B_ = p1_[0] - p2_[0]  # x1 - x2
+    C_ = A_ * p1_[0] + B_ * p1_[1]  # A*x1 + B*y1
+    return A_, B_, -C_  # 返回 A, B, C
+
+
+def intersection_of_lines(line1_, line2_):
+    """ 解两条直线的交点，line1和line2分别是(A1, B1, C1)和(A2, B2, C2) """
+    A1_, B1_, C1_ = line1_
+    A2_, B2_, C2_ = line2_
+
+    # 计算行列式
+    det_ = A1_ * B2_ - A2_ * B1_
+    if det_ == 0:
+        return None  # 直线平行，没有交点
+    else:
+        x = (B1_ * C2_ - B2_ * C1_) / det_
+        y = (A2_ * C1_ - A1_ * C2_) / det_
+        return [x, y]
+
+
+# p2 = p0 + t * (p1-p0)
+def get_mediate_pt(p0_, p1_, t_):
+    return [p0_[0]+t_*(p1_[0]-p0_[0]), p0_[1]+t_*(p1_[1]-p0_[1])]
+
+
 # 叉积计算
 #   对于凸包而言，v1 = p2-p1, v2 = p3-p1，通过计算叉乘计算 3 点方向
 #   如果叉乘结果 = 0 , 则说明 p1/p2/p3 共线
@@ -54,7 +82,14 @@ def calc_point_inline_with_y(pt1_, pt2_, y_):
 
 
 def calc_cross_degree(v1_, v2_):
+    print(np.dot(v1_, v2_) / (np.linalg.norm(v1_)*np.linalg.norm(v2_)))
     return np.degrees(np.arccos(np.dot(v1_, v2_) / (np.linalg.norm(v1_)*np.linalg.norm(v2_))))
+
+
+def calc_cross_degree_based_point(sPt_, mPt_, ePt_):
+    v1_ = [sPt_[0]-mPt_[0], sPt_[1]-mPt_[1]]
+    v2_ = [ePt_[0]-mPt_[0], ePt_[1]-mPt_[1]]
+    return calc_cross_degree(v1_, v2_)
 
 
 # #########################################仿射变换#################################################################3
@@ -344,16 +379,13 @@ def get_polygon_area(vertexs):
     return abs(area)
 
 
-def get_polygon_len(vertexs):
+def get_polygon_len(vertexs_):
     # 计算多边形的周长
-    length = 0
-    vertexsNum = len(vertexs)
-    assert vertexsNum >= 3, "少于3个点是构建不了凸多边形的"
+    vertexsNum_ = len(vertexs_)
+    assert vertexsNum_ >= 3, "少于3个点是构建不了凸多边形的"
 
-    for i in range(vertexsNum):
-        j = (i + 1) % vertexsNum
-        length += distance_p1p2(vertexs[i], vertexs[j])
-    return length
+    length_ = get_traj_len(vertexs_, True)
+    return length_
 
 
 def get_polygon_gravity(vertexs):
@@ -467,6 +499,17 @@ def expand_polygon_d(vertexs_, d, expand_point=False):
 
 
 # ===========================================================轨迹相关==========================================================
+def get_traj_len(vertexs_, isClosed_=False):
+    # 计算多边形的周长
+    length_ = 0
+    vertexsNum_ = len(vertexs_)
+    assert vertexsNum_ >= 2, "少于2个点是构建不了路径"
+
+    traverseLen_ = vertexsNum_ if isClosed_ else vertexsNum_-1
+    for i_ in range(traverseLen_):
+        j_ = (i_ + 1) % vertexsNum_
+        length_ += distance_p1p2(vertexs_[i_], vertexs_[j_])
+    return length_
 
 
 def calc_line_num_in_polygon(outRect, step):
@@ -530,10 +573,13 @@ def fix_lines(rVertexs, rVertexsE, routRect, rOutRectE, lines, d, sStep):
         if d != 0:
             # 遍历每一个多边形顶点
             newY = lines[0][1]
-            while newY <= routRectSmall[0][1]:
+            YLim = 0.4*(routRectBig[0][1]-routRectSmall[0][1]) + routRectSmall[0][1]
+            while newY <= YLim:
                 newY += 0.1 * sStep
-            if newY >= routRectBig[0][1]:
-                newY = 0.4*(rVertexsBig[0][1]-routRectSmall[0][1]) + routRectSmall[0][1]
+
+            if (newY >= routRectBig[0][1]) or (newY <= routRectSmall[0][1]):
+                newY = YLim
+
             for j in range(vertexsNum):
                 point = calc_point_inline_with_y(
                     rVertexsBig[j],
@@ -573,10 +619,13 @@ def fix_lines(rVertexs, rVertexsE, routRect, rOutRectE, lines, d, sStep):
         if d != 0:
             # 遍历每一个多边形顶点
             newY = linesCp[-1][1]
-            while newY >= routRectSmall[2][1]:
+            YLim = 0.4 * (routRectBig[2][1] - routRectSmall[2][1]) + routRectSmall[2][1]
+            while newY >= YLim:
                 newY -= 0.1*sStep
-            if newY <= rVertexsBig[2][1]:
-                newY = 0.4 * (rVertexsBig[2][1] - routRectSmall[2][1]) + routRectSmall[2][1]
+
+            if (newY <= routRectBig[2][1]) or (newY >= routRectSmall[2][1]):
+                newY = YLim
+
             for j in range(vertexsNum):
                 point = calc_point_inline_with_y(
                     rVertexsBig[j],

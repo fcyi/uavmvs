@@ -65,6 +65,259 @@ def line_traj_2D(psxy, pexy, residual, step, refineStepRatio=1):
     return traj, residualArc
 
 
+# 等间隔插点，为了避免b样条平滑时因为相邻间隔差异过大问题产生较大的无效曲线部分
+def line_traj_node_add_2D(pts_):
+    ptsNums_ = len(pts_)
+    ptsNew_ = []
+    disSeg_ = -1
+    if ptsNums_ < 3:
+        ptsNew_ = copy.deepcopy(pts_)
+        disSeg_ = gtls.distance_p1p2(pts_[0], pts_[1]) if ptsNew_ == 2 else 0
+    else:
+        diss_ = []
+        for ptI_ in range(ptsNums_-1):
+            diss_.append(gtls.distance_p1p2(pts_[ptI_], pts_[ptI_+1]))
+        diss_ = sorted(diss_)
+        disSegI_ = -1
+        for dI_ in range(ptsNums_-1):
+            if np.isclose(diss_[dI_], 0):
+                continue
+            disSegI_ = dI_
+            break
+
+        if disSegI_ != ptsNums_-2:
+            disSeg0_, disSeg1_ = diss_[disSegI_], diss_[disSegI_+1]
+            if disSeg0_ < (disSeg1_ / 2.):
+                disSeg_ = disSeg1_ / 2.
+            else:
+                disSeg_ = disSeg0_
+        else:
+            disSeg0_ = diss_[disSegI_]
+            disSeg_ = disSeg0_ / 2.
+
+        for ptI_ in range(ptsNums_-1):
+            ptJ_ = ptI_ + 1
+
+            ptsNT_, rest_ = line_traj_2D(pts_[ptI_], pts_[ptJ_], 0, disSeg_, 1)
+            ptsNew_ += ptsNT_
+            if (rest_ == 0) and (ptJ_ != ptsNums_-1):
+                ptsNew_.pop()
+            elif (rest_ != 0) and (ptJ_ == ptsNums_-1):
+                ptsNew_.append(pts_[ptJ_])
+
+    return ptsNew_, disSeg_
+
+
+# 拐角点索引记录
+def wrapPoint_index(pts_, ptsNew_):
+    wpIndexs_ = []
+    pnLen_ = len(ptsNew_)
+    pLen_ = len(pts_)
+
+    nIdx_ = 0
+    idx_ = 1  # 任意一条折线型路线，其两个端点都不是拐角点
+
+    while (idx_ < pLen_-1) and (nIdx_ < pnLen_):
+        if (ptsNew_[nIdx_][0] == pts_[idx_][0]) and (ptsNew_[nIdx_][1] == pts_[idx_][1]):
+            wpIndexs_.append(nIdx_)
+            idx_ += 1
+        nIdx_ += 1
+
+    return wpIndexs_
+
+
+# 节点平滑，拐角更新
+def process_points(pts_, threshold_, wpIndexs_):
+    processedPts_ = []
+    processedWps_ = []
+    ptLen_ = len(pts_)
+    wpLen_ = len(wpIndexs_)
+    idx_ = 0
+    wIdx_ = 0
+    thresholdFix_ = threshold_ - threshold_/3.
+    while idx_ < ptLen_:
+        if (idx_ < ptLen_ - 1) and gtls.distance_p1p2(pts_[idx_], pts_[idx_ + 1]) < thresholdFix_:
+            smoothPtIdxs_ = []
+            disLocalSum_ = 0
+            smoothPtDis_ = [0]
+            # 找到一系列相邻点，计算平均坐标
+            smoothPtIdxs_.append(idx_)
+            count_ = 1
+
+            # 向前遍历，直到不满足条件
+            while (idx_ < ptLen_ - 1) and (gtls.distance_p1p2(pts_[idx_], pts_[idx_ + 1]) < thresholdFix_):
+                disLocalSum_ += gtls.distance_p1p2(pts_[idx_], pts_[idx_ + 1])
+                idx_ += 1
+                smoothPtDis_.append(disLocalSum_)
+                smoothPtIdxs_.append(idx_)
+                count_ += 1
+
+            # 计算平均坐标
+            smoothStartIdx_, smoothEndIdx_ = smoothPtIdxs_[0], smoothPtIdxs_[-1]
+            smpTmps_ = []
+            if disLocalSum_ < thresholdFix_:
+                avgX_, avgY_ = 0, 0
+                for sIdx_ in smoothPtIdxs_:
+                    avgX_ += pts_[sIdx_][0]
+                    avgY_ += pts_[sIdx_][1]
+                avgX_ = avgX_ / count_
+                avgY_ = avgY_ / count_
+                smpTmps_.append([avgX_, avgY_])
+            else:  # 当需要平滑的部分过大的时候，这种方式可以保留一定的路径结构
+                segBinNum_ = math.floor(disLocalSum_ / thresholdFix_)
+                disLocalSeg_ = disLocalSum_ / segBinNum_
+
+                smoothPtIdxsLen_ = len(smoothPtIdxs_)
+                rest_ = 0
+                for sIdxIdx_ in range(smoothPtIdxsLen_-1):
+                    ptsNT_, rest_ = line_traj_2D(pts_[smoothPtIdxs_[sIdxIdx_]], pts_[smoothPtIdxs_[sIdxIdx_+1]], rest_, disLocalSeg_, 1)
+                    smpTmps_ += ptsNT_
+                smpTmps_.pop()
+                smpTmps_.append(pts_[smoothPtIdxs_[-1]])
+
+            smpLen_ = len(smpTmps_)
+            for smpTmpIdx_ in range(smpLen_):
+                sPt_, ePt_ = None, None
+                if smpTmpIdx_ == 0:
+                    sPt_ = pts_[smoothStartIdx_-1] if smoothStartIdx_ != 0 else None
+                else:
+                    sPt_ = smpTmps_[smpTmpIdx_-1]
+
+                if smpTmpIdx_ == smpLen_-1:
+                    ePt_ = pts_[smoothEndIdx_+1] if smoothEndIdx_ != (ptLen_-1) else None
+                else:
+                    ePt_ = smpTmps_[smpTmpIdx_+1]
+
+                mPt_ = smpTmps_[smpTmpIdx_]
+                if (sPt_ is not None) and (ePt_ is not None):
+                    if gtls.calc_cross_degree_based_point(sPt_, mPt_, ePt_) < 135:  # 若当前点左右皆有节点，并且与左右节点的连线形成的夹角小于135度，则说明这是个拐角点
+                        processedWps_.append(len(processedPts_))
+                processedPts_.append(mPt_)
+        else:
+            if idx_ in wpIndexs_:
+                if (len(processedPts_) != 0) and (idx_ != ptLen_-1):
+                    if gtls.calc_cross_degree_based_point(processedPts_[-1], pts_[idx_], pts_[idx_+1]) < 135:
+                        processedWps_.append(len(processedPts_))
+            processedPts_.append(pts_[idx_])
+
+        idx_ += 1
+
+    return processedPts_, processedWps_
+
+
+# 节点修缮，挑出直角锐角点，扩大其平滑范围
+def fix_wrapNodes(pts_, wpIndexs_, degThres_=90):
+    removePtIdxs_ = []
+    ptLen_ = len(pts_)
+    wpLen_ = len(wpIndexs_)
+    for wpIdx_ in wpIndexs_:
+        if (wpIdx_ != 0) and (wpIdx_ != ptLen_-1):
+            degTmp_ = gtls.calc_cross_degree_based_point(pts_[wpIdx_-1], pts_[wpIdx_], pts_[wpIdx_+1])
+            if degTmp_ <= degThres_:
+                removePtIdxs_.append(wpIdx_-1)
+                removePtIdxs_.append(wpIdx_+1)
+    wpIdxIdxS_ = 0
+    removePtIdxsT_ = []
+    removePtIdxs_ = sorted(removePtIdxs_)
+    for removePtIdx_ in removePtIdxs_:
+        needRemove_, wpIdxIdxS_ = btls.get_equal_based_sortedSquences(removePtIdx_, wpIndexs_, wpIdxIdxS_, wpLen_)
+        needRemove_ = not needRemove_
+        if needRemove_:
+            removePtIdxsT_.append(removePtIdx_)
+
+    ptsFix_ = []
+    wrapIndexsFix_ = []
+    rIdxS_ = 0
+    wpIdxIdxS_ = 0
+    rLen_ = len(removePtIdxsT_)
+
+    for ptIdx_ in range(ptLen_):
+        needSave_, rIdxS_ = btls.get_equal_based_sortedSquences(ptIdx_, removePtIdxsT_, rIdxS_, rLen_)
+        needSave_ = not needSave_
+        if needSave_:
+            isFound_, wpIdxIdxS_ = btls.get_equal_based_sortedSquences(ptIdx_, wpIndexs_, wpIdxIdxS_, wpLen_)
+            if isFound_:
+                wrapIndexsFix_.append(len(ptsFix_))
+            ptsFix_.append(pts_[ptIdx_])
+
+    return ptsFix_, wrapIndexsFix_
+
+
+# 锐角处理，采用割角或扩角的方式
+def fix_sharp(pts_, wpIndexs_, degThres_, isCut=True):
+    sharpIdxs_ = []
+    ptLen_ = len(pts_)
+    wpLen_ = len(wpIndexs_)
+    for wpIdx_ in wpIndexs_:
+        if (wpIdx_ != 0) and (wpIdx_ != ptLen_ - 1):
+            degTmp_ = gtls.calc_cross_degree_based_point(pts_[wpIdx_ - 1], pts_[wpIdx_], pts_[wpIdx_ + 1])
+            if degTmp_ <= degThres_:
+                sharpIdxs_.append(wpIdx_)
+
+    spIdxIdxS_ = 0
+    spLen_ = len(sharpIdxs_)
+    sharpFixs_ = []
+    while spIdxIdxS_ < spLen_:
+        spIdxsTmp_ = [sharpIdxs_[spIdxIdxS_]]
+        spIdxIdxS_ += 1
+        while (spIdxIdxS_ < spLen_) and (sharpIdxs_[spIdxIdxS_] == spIdxsTmp_[-1]+1):
+            spIdxsTmp_.append(sharpIdxs_[spIdxIdxS_])
+            spIdxIdxS_ += 1
+        sptLen_ = len(spIdxsTmp_)
+        if sptLen_ == 1:
+            # 利用角平分线进行割角
+            pass
+        else:
+            # 利用加权均值的方式对角点进行移动
+            t_ = 0.3  # 用于控制弯曲度
+            for spIdx_ in spIdxsTmp_:
+                sps_ = pts_[spIdx_-1]
+                spm_ = pts_[spIdx_]
+                spe_ = pts_[spIdx_+1]
+                spt_ = gtls.get_mediate_pt(pts_[spIdx_-1], pts_[spIdx_+1])
+
+
+            pass
+
+    return
+
+
+# 构建拐弯区间，
+# 若isRefine为True，则若相邻的拐角点之间的非拐角点小于等于2，则这部分都会被划到同一个拐弯范围中
+# 若isRefine为False，则若相邻的拐角点之间的非拐角点小于等于1，则这部分都会被划到同一个拐弯范围中
+def get_wrapRange(wpIndexs_, nodeLen_, isRefine=False):
+    wrapRanges_ = []
+    wpIdxIdx_ = 0
+    wpLen_ = len(wpIndexs_)
+    wpSeg_ = 2 if not isRefine else 3
+    while wpIdxIdx_ < wpLen_:
+        wrapL_, wrapR_ = -1, -1
+
+        wpIdxCur_ = wpIndexs_[wpIdxIdx_]
+        wrapL_ = wpIdxCur_-1 if wpIdxCur_ > 0 else wpIdxCur_
+
+        wpIdxIdx_ += 1
+        wpIdxCurTmp_ = wpIdxCur_
+        while wpIdxIdx_ < wpLen_:
+            wpIdxNt_ = wpIndexs_[wpIdxIdx_]
+            if (wpIdxNt_ - wpIdxCurTmp_) <= wpSeg_:
+                wrapR_ = wpIdxNt_ + 1
+                wpIdxIdx_ += 1
+                wpIdxCurTmp_ = wpIdxNt_
+            else:
+                wrapR_ = wpIdxCurTmp_ + 1
+                break
+
+        if wrapR_ == -1:
+            wrapR_ = wpIdxCur_+1
+
+        if wrapR_ >= nodeLen_:
+            wrapR_ = nodeLen_-1
+        wrapRanges_.append([wrapL_, wrapR_])
+
+    return wrapRanges_
+
+
 # 获取偏航角对应的旋转矩阵（也就是绕着第2个坐标分量进行旋转，对应的旋转矩阵）
 def get_yaw_rot(org_vec, targt_vec):
     # org_vec为参考向量，targt_vec为坐标与原点所连成的归一化后的单位向量
@@ -120,6 +373,160 @@ def get_Tw2c_1(t, R, isTranspose=False):
     return (-np.dot(rotM, t)).reshape((3,))
 
 
+def get_traj_by_node_sim_test(nodeList, step, rratio, yawType=-2, isSmooth=True, isClose=False):
+    """
+    nodeList: 航线节点
+    step: 航向间隔
+    rstep: 拐弯处的航向间隔
+    yawType: 偏航角类型，1-相机朝向与飞机行进方向一致，2-相机镜头朝着行进方向逆时针90度的方向，0-相机镜头朝着行进方向顺时针90度的方向，-2-大疆的行进方向, -1-五向飞行, -3-带偏移五向飞行, -4-五向飞行2
+    isSmooth: 是否使用b样条插值法对拐角处进行平滑
+    """
+    traj_ = []
+    rest_ = 0
+    assert yawType in (0, 1, 2, -2, -1, -3, -4), '偏航角定义存在问题'
+
+    lineds = []  # 每一段直线或弧线所包含的采集位置数目
+    nodeLen = len(nodeList)
+    travLen = nodeLen if isClose else nodeLen-1
+
+
+
+
+    rest_ = 0
+    pSrc_ = None
+    refineStep_ = step * rratio
+    # assert travLen % 2 == 0, "目前平滑操作仅适用于标准的牛耕路线，而标准的牛耕路线中轨迹节点有且仅有偶数个"
+    for i in range(0, travLen, 2):
+        j = (i+1) % nodeLen
+        if not pSrc_:
+            pSrc_ = nodeList[i]
+        pSrcT_ = nodeList[i]
+        pDst_ = nodeList[j]
+        trajt_, _ = line_traj_2D(pSrc_, pDst_, 0, step, 1)
+        traj_ += trajt_
+
+        if i <= (travLen-4):  # 只有这种情况下的拐角才有处理的必要
+            ctrPts_ = [[]]*4  # b样条插值所需的控制点
+            ctrPts_[1] = pDst_
+            ctrPts_[2] = nodeList[(i+2) % nodeLen]
+            samplePt3T = nodeList[(i+3) % nodeLen]
+            dis00 = gtls.distance_p1p2(pSrcT_, ctrPts_[1])
+            dis10 = gtls.distance_p1p2(ctrPts_[2], samplePt3T)
+            if (dis00 > 0) and (dis10 > 0):  # b样条插值的控制点钟不能有重复点
+                _ = traj_.pop()
+                ctrPts_[0] = traj_[-1]
+                dis01 = gtls.distance_p1p2(ctrPts_[0], ctrPts_[1])
+                disR = dis01 / dis00
+                ctrPts_[3] = [
+                    ctrPts_[2][0] + (samplePt3T[0]-ctrPts_[2][0])*disR,
+                    ctrPts_[2][1] + (samplePt3T[1]-ctrPts_[2][1])*disR
+                ]
+
+                ctrPts_ = np.array(ctrPts_)
+                ctrXs_ = ctrPts_[:, 0]
+                ctrYs_ = ctrPts_[:, 1]
+
+                tckNodes_, _ = interpolate.splprep([ctrXs_, ctrYs_], k=3, s=0)
+                tList_ = np.linspace(0, 1, num=12, endpoint=True)
+                out_ = interpolate.splev(tList_, tckNodes_)
+                disSum_ = 0
+                for tIdx_ in range(11):
+                    disSum_ += gtls.distance_p1p2(
+                        [out_[0][tIdx_], out_[1][tIdx_]],
+                        [out_[0][tIdx_+1], out_[1][tIdx_+1]]
+                    )
+                ptsNum_ = math.ceil(disSum_ / refineStep_)
+                print("xxxxxxxxxxxxxxxxxxxxxxx==", ptsNum_, "==xxxxxxxxxxxxxxxxxxxxxxx")
+                tList_ = np.linspace(0, 1, num=ptsNum_, endpoint=True)
+                out_ = interpolate.splev(tList_, tckNodes_)
+                wrapTrajs_ = [[out_[0][oIdx_], out_[1][oIdx_]] for oIdx_ in range(ptsNum_)]
+
+                pSrc_ = wrapTrajs_.pop()
+                traj_ += wrapTrajs_
+            elif (dis00 > 0) and (dis10 == 0):
+                _ = traj_.pop()
+                ctrPts_[0] = traj_[-1]
+                _ = ctrPts_.pop()
+                ctrPts_ = np.array(ctrPts_)
+                ctrXs_ = ctrPts_[:, 0]
+                ctrYs_ = ctrPts_[:, 1]
+
+                tckNodes_, _ = interpolate.splprep([ctrXs_, ctrYs_], k=2, s=0)
+                tList_ = np.linspace(0, 1, num=9, endpoint=True)
+                out_ = interpolate.splev(tList_, tckNodes_)
+                disSum_ = 0
+                for tIdx_ in range(9):
+                    disSum_ += gtls.distance_p1p2(
+                        [out_[0][tIdx_], out_[1][tIdx_]],
+                        [out_[0][tIdx_ + 1], out_[1][tIdx_ + 1]]
+                    )
+                ptsNum_ = math.ceil(disSum_ / refineStep_)
+                print("xxxxxxxxxxxxxxxxxxxxxxx==", ptsNum_, "==xxxxxxxxxxxxxxxxxxxxxxx")
+                tList_ = np.linspace(0, 1, num=ptsNum_, endpoint=True)
+                out_ = interpolate.splev(tList_, tckNodes_)
+                wrapTrajs_ = [[out_[0][oIdx_], out_[1][oIdx_]] for oIdx_ in range(ptsNum_)]
+                pSrc_ = wrapTrajs_.pop()
+                traj_ += wrapTrajs_
+            elif (dis00 == 0) and (dis10 > 0):
+                _ = traj_.pop()
+                ctrPts_[0] = traj_[-1]
+                if dis10 < step:
+                    disR = 1
+                else:
+                    disR = step / dis10
+                ctrPts_[3] = [
+                    ctrPts_[2][0] + (samplePt3T[0] - ctrPts_[2][0]) * disR,
+                    ctrPts_[2][1] + (samplePt3T[1] - ctrPts_[2][1]) * disR
+                ]
+
+                ctrPts_ = np.array(ctrPts_)
+                ctrXs_ = ctrPts_[:, 0]
+                ctrYs_ = ctrPts_[:, 1]
+
+                tckNodes_, _ = interpolate.splprep([ctrXs_, ctrYs_], k=3, s=0)
+                tList_ = np.linspace(0, 1, num=12, endpoint=True)
+                out_ = interpolate.splev(tList_, tckNodes_)
+                disSum_ = 0
+                for tIdx_ in range(11):
+                    disSum_ += gtls.distance_p1p2(
+                        [out_[0][tIdx_], out_[1][tIdx_]],
+                        [out_[0][tIdx_ + 1], out_[1][tIdx_ + 1]]
+                    )
+                ptsNum_ = math.ceil(disSum_ / refineStep_)
+                print("xxxxxxxxxxxxxxxxxxxxxxx==", ptsNum_, "==xxxxxxxxxxxxxxxxxxxxxxx")
+                tList_ = np.linspace(0, 1, num=ptsNum_, endpoint=True)
+                out_ = interpolate.splev(tList_, tckNodes_)
+                wrapTrajs_ = [[out_[0][oIdx_], out_[1][oIdx_]] for oIdx_ in range(ptsNum_)]
+
+                pSrc_ = wrapTrajs_.pop()
+                traj_ += wrapTrajs_
+            else:
+                trajt_, _ = line_traj_2D(pSrc_, ctrPts_[2], 0, step, 1)
+                pSrc_ = trajt_.pop()
+                traj_ += trajt_
+
+    cot = 0
+    # 0-行进方式为顺时针，1-行进方向为逆时针
+    suniL = [0, 0, 1, 1]
+    # 大疆的相机朝向
+    yawList = [0, 1, 2, 1]  # 遍历的路线为从上到下，从左到右
+    for i in range(len(lineds)):  # 对每一条路线进行遍历
+        posNum = lineds[i]
+        sunit = suniL[i % 4]
+
+        if yawType != -2:
+            yawd = yawType
+        else:
+            yawd = yawList[i % 4]
+
+        for pi in range(posNum):
+            # 获取位置的路线信息(0表示直线)、镜头方向信息、路线行进是否为逆时针（主要是针对于弧型路线，求相机朝向时很必要）
+            traj_[cot] += [0, yawd, sunit]
+            cot += 1
+
+    return traj_
+
+
 def get_traj_by_node_sim(nodeList, step, rratio, yawType=-2, isSmooth=True, isClose=False):
     """
     nodeList: 航线节点
@@ -145,7 +552,8 @@ def get_traj_by_node_sim(nodeList, step, rratio, yawType=-2, isSmooth=True, isCl
     else:
         rest_ = 0
         pSrc_ = None
-        assert travLen % 2 == 0, "目前平滑操作仅适用于标准的牛耕路线，而标准的牛耕路线中轨迹节点有且仅有偶数个"
+        refineStep_ = step * rratio
+        # assert travLen % 2 == 0, "目前平滑操作仅适用于标准的牛耕路线，而标准的牛耕路线中轨迹节点有且仅有偶数个"
         for i in range(0, travLen, 2):
             j = (i+1) % nodeLen
             if not pSrc_:
@@ -162,7 +570,6 @@ def get_traj_by_node_sim(nodeList, step, rratio, yawType=-2, isSmooth=True, isCl
                 samplePt3T = nodeList[(i+3) % nodeLen]
                 dis00 = gtls.distance_p1p2(pSrcT_, ctrPts_[1])
                 dis10 = gtls.distance_p1p2(ctrPts_[2], samplePt3T)
-                refineStep_ = step * rratio
                 if (dis00 > 0) and (dis10 > 0):  # b样条插值的控制点钟不能有重复点
                     _ = traj_.pop()
                     ctrPts_[0] = traj_[-1]
