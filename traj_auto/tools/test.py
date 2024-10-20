@@ -203,7 +203,6 @@ def pathSmooth():
     # plt.title('smooth traj')
     # plt.show()
 
-
     # b样条曲线平滑（局部平滑）
     localSmoothNodes_ = []
     ptIdxS_ = 0
